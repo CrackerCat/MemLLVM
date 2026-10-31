@@ -15,6 +15,21 @@
 
 namespace memllvm {
 
+class AutoMemoryPass : public llvm::PassInfoMixin<AutoMemoryPass> {
+public:
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
+};
+
+class StlStubPass : public llvm::PassInfoMixin<StlStubPass> {
+public:
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
+};
+
+class GlobalConstructorPass : public llvm::PassInfoMixin<GlobalConstructorPass> {
+public:
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
+};
+
 class AutoLoadLibraryPass : public llvm::PassInfoMixin<AutoLoadLibraryPass> {
 public:
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);

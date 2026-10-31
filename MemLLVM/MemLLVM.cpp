@@ -179,8 +179,8 @@ public:
     auto normalizeDll = [](const std::string &dll) -> std::string {
       if (dll == "kernel32.dll" || dll == "ntdll.dll")
         return "";
-      if (dll == "ucrtbased.dll" || dll.rfind("api-ms-win-crt-", 0) == 0)
-        return "ucrtbase.dll";
+      if (dll == "ucrtbased.dll" || dll == "ucrtbase.dll" || dll.rfind("api-ms-win-crt-", 0) == 0)
+        return "msvcrt.dll";
       return dll;
     };
 
@@ -286,6 +286,266 @@ static Function *findOrSynthesizeEntryPoint(Module &M) {
            << " to binary offset 0x00!\n";
   }
   return EntryFn;
+}
+
+PreservedAnalyses AutoMemoryPass::run(Module &M, ModuleAnalysisManager &MAM) {
+  LLVMContext &Ctx = M.getContext();
+  Type *PtrTy = PointerType::get(Ctx, 0);
+  Type *Int32Ty = Type::getInt32Ty(Ctx);
+  Type *Int64Ty = Type::getInt64Ty(Ctx);
+
+  bool Changed = false;
+
+  auto getOrInsertGetProcessHeap = [&]() -> FunctionCallee {
+    return M.getOrInsertFunction("GetProcessHeap", FunctionType::get(PtrTy, false));
+  };
+  auto getOrInsertHeapAlloc = [&]() -> FunctionCallee {
+    return M.getOrInsertFunction("HeapAlloc", FunctionType::get(PtrTy, {PtrTy, Int32Ty, Int64Ty}, false));
+  };
+  auto getOrInsertHeapFree = [&]() -> FunctionCallee {
+    return M.getOrInsertFunction("HeapFree", FunctionType::get(Int32Ty, {PtrTy, Int32Ty, PtrTy}, false));
+  };
+
+  auto synthesizeNew = [&](Function *F) {
+    if (!F || !F->isDeclaration()) return;
+    BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
+    IRBuilder<> B(BB);
+    Value *SizeVal = F->getArg(0);
+    if (SizeVal->getType() != Int64Ty) {
+      SizeVal = B.CreateZExtOrTrunc(SizeVal, Int64Ty);
+    }
+    Value *IsZero = B.CreateICmpEQ(SizeVal, ConstantInt::get(Int64Ty, 0));
+    Value *AllocSize = B.CreateSelect(IsZero, ConstantInt::get(Int64Ty, 1), SizeVal);
+
+    Value *hHeap = B.CreateCall(getOrInsertGetProcessHeap(), {});
+    Value *Alloc = B.CreateCall(getOrInsertHeapAlloc(), {hHeap, ConstantInt::get(Int32Ty, 0), AllocSize});
+    B.CreateRet(Alloc);
+    Changed = true;
+    errs() << "[MemLLVM] AutoMemoryPass: Synthesized " << F->getName() << "\n";
+  };
+
+  auto synthesizeDelete = [&](Function *F) {
+    if (!F || !F->isDeclaration()) return;
+    BasicBlock *EntryBB = BasicBlock::Create(Ctx, "entry", F);
+    BasicBlock *FreeBB = BasicBlock::Create(Ctx, "do_free", F);
+    BasicBlock *RetBB = BasicBlock::Create(Ctx, "exit", F);
+
+    IRBuilder<> B(EntryBB);
+    Value *PtrVal = F->getArg(0);
+    if (PtrVal->getType() != PtrTy) {
+      PtrVal = B.CreatePointerCast(PtrVal, PtrTy);
+    }
+    Value *IsNull = B.CreateICmpEQ(PtrVal, ConstantPointerNull::get(cast<PointerType>(PtrTy)));
+    B.CreateCondBr(IsNull, RetBB, FreeBB);
+
+    B.SetInsertPoint(FreeBB);
+    Value *hHeap = B.CreateCall(getOrInsertGetProcessHeap(), {});
+    B.CreateCall(getOrInsertHeapFree(), {hHeap, ConstantInt::get(Int32Ty, 0), PtrVal});
+    B.CreateBr(RetBB);
+
+    B.SetInsertPoint(RetBB);
+    if (F->getReturnType()->isVoidTy()) {
+      B.CreateRetVoid();
+    } else {
+      B.CreateRet(Constant::getNullValue(F->getReturnType()));
+    }
+    Changed = true;
+    errs() << "[MemLLVM] AutoMemoryPass: Synthesized " << F->getName() << "\n";
+  };
+
+  const char *newFns[] = {
+    "??2@YAPEAX_K@Z",
+    "??_U@YAPEAX_K@Z",
+    "??2@YAPEAX_KAEBUnothrow_t@std@@@Z",
+    "??_U@YAPEAX_KAEBUnothrow_t@std@@@Z"
+  };
+  for (const char *name : newFns) {
+    if (Function *F = M.getFunction(name)) {
+      synthesizeNew(F);
+    }
+  }
+
+  const char *delFns[] = {
+    "??3@YAXPEAX@Z",
+    "??_V@YAXPEAX@Z",
+    "??3@YAXPEAX_K@Z",
+    "??_V@YAXPEAX_K@Z",
+    "??3@YAXPEAXAEBUnothrow_t@std@@@Z",
+    "??_V@YAXPEAXAEBUnothrow_t@std@@@Z"
+  };
+  for (const char *name : delFns) {
+    if (Function *F = M.getFunction(name)) {
+      synthesizeDelete(F);
+    }
+  }
+
+  if (Function *F = M.getFunction("malloc")) {
+    synthesizeNew(F);
+  }
+  if (Function *F = M.getFunction("free")) {
+    synthesizeDelete(F);
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
+  LLVMContext &Ctx = M.getContext();
+  Type *Int32Ty = Type::getInt32Ty(Ctx);
+  bool Changed = false;
+
+  auto getOrInsertExitProcess = [&]() -> FunctionCallee {
+    return M.getOrInsertFunction("ExitProcess", FunctionType::get(Type::getVoidTy(Ctx), {Int32Ty}, false));
+  };
+
+  auto synthesizeAbort = [&](Function *F, uint32_t code) {
+    if (!F || !F->isDeclaration()) return;
+    BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
+    IRBuilder<> B(BB);
+    B.CreateCall(getOrInsertExitProcess(), {ConstantInt::get(Int32Ty, code)});
+    B.CreateUnreachable();
+    Changed = true;
+    errs() << "[MemLLVM] StlStubPass: Synthesized fatal stub " << F->getName() 
+           << " (ExitProcess 0x" << Twine::utohexstr(code) << ")\n";
+  };
+
+  auto synthesizeNoop = [&](Function *F) {
+    if (!F || !F->isDeclaration()) return;
+    BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
+    IRBuilder<> B(BB);
+    if (F->getReturnType()->isVoidTy()) {
+      B.CreateRetVoid();
+    } else {
+      B.CreateRet(Constant::getNullValue(F->getReturnType()));
+    }
+    Changed = true;
+    errs() << "[MemLLVM] StlStubPass: Synthesized no-op stub " << F->getName() << "\n";
+  };
+
+  struct FatalStubEntry {
+    const char *name;
+    uint32_t code;
+  };
+
+  FatalStubEntry stubs[] = {
+    {"?_Xbad_alloc@std@@YAXXZ",               0xC0000017},
+    {"?_Throw_bad_alloc@std@@YAXXZ",           0xC0000017},
+    {"?_Throw_bad_array_new_length@std@@YAXXZ",0xC0000017},
+    {"?_Xlength_error@std@@YAXPEBD@Z",         0xC0000005},
+    {"?_Xout_of_range@std@@YAXPEBD@Z",         0xC000008C},
+    {"?_Xinvalid_argument@std@@YAXPEBD@Z",     0xC000000D},
+    {"?_Xoverflow_error@std@@YAXPEBD@Z",       0xC0000095},
+    {"?_Xruntime_error@std@@YAXPEBD@Z",        0xC0000001},
+    {"_invalid_parameter_noinfo_noreturn",     0xC000000D},
+    {"_CxxThrowException",                     0xE06D7363},
+    {"_purecall",                              0xC0000025}
+  };
+
+  for (const auto &s : stubs) {
+    if (Function *F = M.getFunction(s.name)) {
+      synthesizeAbort(F, s.code);
+    }
+  }
+
+  const char *noopFns[] = {
+    "__std_exception_copy",
+    "__std_exception_destroy",
+    "?_Set_raise_handler@std@@YAP6AXAEBVexception@stdext@@@ZP6AX0@Z@Z"
+  };
+  for (const char *name : noopFns) {
+    if (Function *F = M.getFunction(name)) {
+      synthesizeNoop(F);
+    }
+  }
+
+  // Synthesize std::_Raise_handler global function pointer if declared
+  if (GlobalVariable *GV = M.getGlobalVariable("?_Raise_handler@std@@3P6AXAEBVexception@stdext@@@ZEA")) {
+    if (GV->isDeclaration()) {
+      GV->setInitializer(ConstantPointerNull::get(cast<PointerType>(GV->getValueType())));
+      GV->setConstant(false);
+      GV->setLinkage(GlobalValue::InternalLinkage);
+      Changed = true;
+      errs() << "[MemLLVM] StlStubPass: Synthesized std::_Raise_handler = nullptr\n";
+    }
+  }
+
+  // Synthesize atexit / __cxa_atexit as safe return 0 (no-op in freestanding flat binary)
+  const char *zeroFns[] = {"atexit", "__cxa_atexit"};
+  for (const char *name : zeroFns) {
+    if (Function *F = M.getFunction(name)) {
+      if (F->isDeclaration()) {
+        BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
+        IRBuilder<> B(BB);
+        B.CreateRet(ConstantInt::get(F->getReturnType(), 0));
+        Changed = true;
+        errs() << "[MemLLVM] StlStubPass: Synthesized safe no-op " << F->getName() << "\n";
+      }
+    }
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+PreservedAnalyses GlobalConstructorPass::run(Module &M, ModuleAnalysisManager &MAM) {
+  GlobalVariable *CtorsVar = M.getGlobalVariable("llvm.global_ctors");
+  if (!CtorsVar || !CtorsVar->hasInitializer())
+    return PreservedAnalyses::all();
+
+  ConstantArray *Init = dyn_cast<ConstantArray>(CtorsVar->getInitializer());
+  if (!Init)
+    return PreservedAnalyses::all();
+
+  struct CtorEntry {
+    int32_t priority;
+    Function *func;
+  };
+  std::vector<CtorEntry> Ctors;
+
+  for (unsigned i = 0; i < Init->getNumOperands(); ++i) {
+    ConstantStruct *CS = dyn_cast<ConstantStruct>(Init->getOperand(i));
+    if (!CS || CS->getNumOperands() < 2) continue;
+    ConstantInt *PriorityCI = dyn_cast<ConstantInt>(CS->getOperand(0));
+    Function *CtorFn = dyn_cast<Function>(CS->getOperand(1)->stripPointerCasts());
+    if (PriorityCI && CtorFn && !CtorFn->isDeclaration()) {
+      Ctors.push_back({(int32_t)PriorityCI->getSExtValue(), CtorFn});
+    }
+  }
+
+  if (Ctors.empty()) {
+    CtorsVar->eraseFromParent();
+    return PreservedAnalyses::none();
+  }
+
+  std::stable_sort(Ctors.begin(), Ctors.end(), [](const CtorEntry &a, const CtorEntry &b) {
+    return a.priority < b.priority;
+  });
+
+  Function *EntryFn = findOrSynthesizeEntryPoint(M);
+  if (!EntryFn || EntryFn->empty())
+    return PreservedAnalyses::all();
+
+  Instruction *InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
+  for (Instruction &I : EntryFn->getEntryBlock()) {
+    if (auto *CI = dyn_cast<CallInst>(&I)) {
+      if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "LoadLibraryA") {
+        InsertBefore = I.getNextNode();
+      }
+    } else if (isa<StoreInst>(&I)) {
+      InsertBefore = I.getNextNode();
+    }
+  }
+
+  IRBuilder<> Builder(InsertBefore);
+  for (const auto &item : Ctors) {
+    errs() << "[MemLLVM] GlobalConstructorPass: Inserting call to global constructor @" 
+           << item.func->getName() << " (Priority: " << item.priority << ")\n";
+    Builder.CreateCall(item.func, {});
+  }
+
+  CtorsVar->eraseFromParent();
+  errs() << "[MemLLVM] GlobalConstructorPass: Erased @llvm.global_ctors to eliminate .CRT$XCU section.\n";
+
+  return PreservedAnalyses::none();
 }
 
 PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM) {
@@ -674,6 +934,12 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     } else if (ApiName == "DefWindowProcW") {
       ApiHash = calculateRor13("NtdllDefWindowProc_W");
       errs() << "[MemLLVM] Note: Mapping forwarded API DefWindowProcW -> NtdllDefWindowProc_W\n";
+    } else if (ApiName == "HeapAlloc") {
+      ApiHash = calculateRor13("RtlAllocateHeap");
+      errs() << "[MemLLVM] Note: Mapping forwarded API HeapAlloc -> RtlAllocateHeap\n";
+    } else if (ApiName == "HeapFree") {
+      ApiHash = calculateRor13("RtlFreeHeap");
+      errs() << "[MemLLVM] Note: Mapping forwarded API HeapFree -> RtlFreeHeap\n";
     }
     ResolvedCallees.insert(Callee);
 
@@ -719,8 +985,49 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
   if (!EntryFn || EntryFn->empty())
     return PreservedAnalyses::all();
 
+  struct PointerRebaseEntry {
+    GlobalVariable *GV;
+    SmallVector<uint32_t, 4> Path;
+    Constant *Target;
+  };
 
-  SmallVector<std::pair<GlobalVariable *, Constant *>, 8> PointersToInit;
+  std::function<void(GlobalVariable *, Constant *, SmallVector<uint32_t, 4> &, SmallVector<PointerRebaseEntry, 16> &)>
+      collectRebases = [&](GlobalVariable *GV, Constant *C, SmallVector<uint32_t, 4> &CurPath,
+                           SmallVector<PointerRebaseEntry, 16> &Out) {
+    if (!C) return;
+
+    if (C->getType()->isPointerTy()) {
+      if (isa<GlobalValue>(C) || isa<ConstantExpr>(C)) {
+        PointerRebaseEntry Entry;
+        Entry.GV = GV;
+        Entry.Path = CurPath;
+        Entry.Target = C;
+        Out.push_back(Entry);
+      }
+      return;
+    }
+
+    if (auto *CA = dyn_cast<ConstantArray>(C)) {
+      for (unsigned i = 0; i < CA->getNumOperands(); ++i) {
+        CurPath.push_back(i);
+        collectRebases(GV, CA->getOperand(i), CurPath, Out);
+        CurPath.pop_back();
+      }
+      return;
+    }
+
+    if (auto *CS = dyn_cast<ConstantStruct>(C)) {
+      for (unsigned i = 0; i < CS->getNumOperands(); ++i) {
+        CurPath.push_back(i);
+        collectRebases(GV, CS->getOperand(i), CurPath, Out);
+        CurPath.pop_back();
+      }
+      return;
+    }
+  };
+
+  SmallVector<PointerRebaseEntry, 16> Rebases;
+  std::set<GlobalVariable *> ModifiedGVs;
 
   for (GlobalVariable &GV : M.globals()) {
     if (!GV.hasInitializer())
@@ -732,29 +1039,57 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
     if (!Init)
       continue;
 
-    // Check if Init is a pointer pointing to a GlobalValue or ConstantExpr involving GlobalValue
-    if (Init->getType()->isPointerTy()) {
-      if (isa<GlobalValue>(Init) || isa<ConstantExpr>(Init)) {
-        PointersToInit.push_back({&GV, Init});
+    SmallVector<uint32_t, 4> CurPath;
+    size_t prevCount = Rebases.size();
+    collectRebases(&GV, Init, CurPath, Rebases);
+    if (Rebases.size() > prevCount) {
+      ModifiedGVs.insert(&GV);
+    }
+  }
+
+  if (Rebases.empty())
+    return PreservedAnalyses::all();
+
+  errs() << "[MemLLVM] Running GlobalPointerPass: auto-rebasing " 
+         << Rebases.size() << " pointer slot(s) across " << ModifiedGVs.size() << " global(s)\n";
+
+  Instruction *InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
+  for (Instruction &I : EntryFn->getEntryBlock()) {
+    if (auto *CI = dyn_cast<CallInst>(&I)) {
+      if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "LoadLibraryA") {
+        InsertBefore = I.getNextNode();
       }
     }
   }
 
-  if (PointersToInit.empty())
-    return PreservedAnalyses::all();
+  IRBuilder<> Builder(InsertBefore);
+  LLVMContext &Ctx = M.getContext();
+  Type *Int32Ty = Type::getInt32Ty(Ctx);
 
-  errs() << "[MemLLVM] Running GlobalPointerPass: auto-rebasing " 
-         << PointersToInit.size() << " global pointer(s)\n";
+  for (auto &Entry : Rebases) {
+    Value *SlotPtr = nullptr;
+    if (Entry.Path.empty()) {
+      SlotPtr = Entry.GV;
+    } else {
+      SmallVector<Value *, 5> GepIndices;
+      GepIndices.push_back(ConstantInt::get(Int32Ty, 0));
+      for (uint32_t idx : Entry.Path) {
+        GepIndices.push_back(ConstantInt::get(Int32Ty, idx));
+      }
+      SlotPtr = Builder.CreateInBoundsGEP(Entry.GV->getValueType(), Entry.GV, GepIndices);
+    }
+    Builder.CreateStore(Entry.Target, SlotPtr);
+  }
 
-  IRBuilder<> Builder(&*EntryFn->getEntryBlock().getFirstInsertionPt());
-
-  for (auto &[GV, Target] : PointersToInit) {
-    errs() << "[MemLLVM] Auto-rebasing global pointer: @" << GV->getName() << "\n";
-    // Reset compile-time initializer to null pointer to eliminate ADDR64 relocations
-    GV->setInitializer(ConstantPointerNull::get(cast<PointerType>(GV->getValueType())));
+  for (GlobalVariable *GV : ModifiedGVs) {
+    errs() << "[MemLLVM] Auto-rebasing global/vtable: @" << GV->getName() << "\n";
+    GV->setInitializer(Constant::getNullValue(GV->getValueType()));
     GV->setConstant(false);
-    // Insert dynamic store at entry of main (compiled as RIP-relative LEA + MOV)
-    Builder.CreateStore(Target, GV);
+    if (GV->hasComdat()) GV->setComdat(nullptr);
+    if (GV->getLinkage() == GlobalValue::LinkOnceODRLinkage ||
+        GV->getLinkage() == GlobalValue::LinkOnceAnyLinkage) {
+      GV->setLinkage(GlobalValue::InternalLinkage);
+    }
   }
 
   return PreservedAnalyses::none();
@@ -773,6 +1108,9 @@ extern "C" LLVM_ATTRIBUTE_WEAK PassPluginLibraryInfo llvmGetPassPluginInfo() {
       PB.registerPipelineParsingCallback(
         [](StringRef Name, ModulePassManager &MPM, ArrayRef<PassBuilder::PipelineElement>) {
           if (Name == "mem-llvm") {
+            MPM.addPass(memllvm::AutoMemoryPass());
+            MPM.addPass(memllvm::StlStubPass());
+            MPM.addPass(memllvm::GlobalConstructorPass());
             MPM.addPass(memllvm::AutoLoadLibraryPass());
             MPM.addPass(memllvm::StackStringPass());
             MPM.addPass(memllvm::ApiResolvePass());
@@ -784,6 +1122,9 @@ extern "C" LLVM_ATTRIBUTE_WEAK PassPluginLibraryInfo llvmGetPassPluginInfo() {
 
       PB.registerOptimizerLastEPCallback(
         [](ModulePassManager &MPM, OptimizationLevel Level, ThinOrFullLTOPhase Phase) {
+          MPM.addPass(memllvm::AutoMemoryPass());
+          MPM.addPass(memllvm::StlStubPass());
+          MPM.addPass(memllvm::GlobalConstructorPass());
           MPM.addPass(memllvm::AutoLoadLibraryPass());
           MPM.addPass(memllvm::StackStringPass());
           MPM.addPass(memllvm::ApiResolvePass());
