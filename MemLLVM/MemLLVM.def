@@ -1,0 +1,6 @@
+LIBRARY MemLLVM
+EXPORTS
+  llvmGetPassPluginInfo
+  RunAllTests
+  RunTests
+  RunAllTestsW

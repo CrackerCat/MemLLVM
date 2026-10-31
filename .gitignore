@@ -1,0 +1,76 @@
+# ==========================================
+# MemLLVM - Git Ignore Rules
+# ==========================================
+
+# Build output directories
+build/
+bin/
+out/
+dist/
+target/
+
+# Visual Studio / IDE files
+.vs/
+.vscode/
+*.vcxproj.user
+*.sln.docstates
+*.suo
+*.user
+*.userosscache
+*.sln.ide
+
+# CMake temporary files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+CMakeUserPresets.json
+
+# Compiled object and library files
+*.obj
+*.o
+*.lib
+*.a
+*.exp
+
+# Executables, DLLs, and flat binaries
+*.exe
+*.dll
+*.dylib
+*.so
+*.bin
+*.manifest
+
+# Debugging and symbol files
+*.pdb
+*.idb
+*.ilk
+*.map
+*.ipdb
+*.iobj
+*.dmp
+*.log
+
+# LLVM temporary IR / disassembly
+*.ll
+*.bc
+*.s
+*.asm
+
+# OS generated files
+Thumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*~
+*.swp
