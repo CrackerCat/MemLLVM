@@ -1,6 +1,19 @@
 add_llvm_pass_plugin(MemLLVM
-  MemLLVM.cpp
   MemLLVM.h
+  MemLLVMUtils.h
+  MemLLVMUtils.cpp
+  SdkImportResolver.h
+  SdkImportResolver.cpp
+  AutoMemoryPass.cpp
+  StlStubPass.cpp
+  GlobalLifecyclePass.cpp
+  GlobalSectionPass.cpp
+  GlobalPointerPass.cpp
+  AutoLoadLibraryPass.cpp
+  StackStringPass.cpp
+  ApiResolvePass.cpp
+  PassRegistry.cpp
+  SelfTestEngine.cpp
   ResolverBitcode.h
   MemLLVM.def
 )

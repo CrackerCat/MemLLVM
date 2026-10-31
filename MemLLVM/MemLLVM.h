@@ -25,7 +25,20 @@ public:
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
 };
 
-class GlobalConstructorPass : public llvm::PassInfoMixin<GlobalConstructorPass> {
+class GlobalLifecyclePass : public llvm::PassInfoMixin<GlobalLifecyclePass> {
+public:
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
+};
+
+// Backward compatibility alias for GlobalConstructorPass
+using GlobalConstructorPass = GlobalLifecyclePass;
+
+class GlobalSectionPass : public llvm::PassInfoMixin<GlobalSectionPass> {
+public:
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
+};
+
+class GlobalPointerPass : public llvm::PassInfoMixin<GlobalPointerPass> {
 public:
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
 };
@@ -41,11 +54,6 @@ public:
 };
 
 class ApiResolvePass : public llvm::PassInfoMixin<ApiResolvePass> {
-public:
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
-};
-
-class GlobalPointerPass : public llvm::PassInfoMixin<GlobalPointerPass> {
 public:
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
 };
