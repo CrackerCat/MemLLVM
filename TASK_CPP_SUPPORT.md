@@ -55,7 +55,7 @@ flowchart TD
 ### 阶段一：内存与 MSVC STL 核心桩合成引擎 (Phase 1)
 > **目标**：彻底解决 `undefined symbol: operator new` 和 `std::_Xbad_alloc`，让代码能直接 `#include <vector>`。
 
-- [ ] **Task 1.1: 实现 `AutoMemoryPass`**
+- [x] **Task 1.1: 实现 `AutoMemoryPass`**
   - 在 [MemLLVM.cpp](file:///D:/MemLLVM/MemLLVM/MemLLVM.cpp) 中增加内存算子合成逻辑。
   - 检索模块中未解析的符号：
     - `??2@YAPEAX_K@Z` (`operator new(size_t)`)
@@ -65,7 +65,7 @@ flowchart TD
     - `??3@YAXPEAX_K@Z` (`operator delete(void*, size_t)`)
   - 自动向 IR 模块注入合成函数体，调用 `kernel32!HeapAlloc(GetProcessHeap(), 0, size)` 与 `kernel32!HeapFree`。
 
-- [ ] **Task 1.2: 实现 `StlStubPass` (MSVC STL 异常截断桩)**
+- [x] **Task 1.2: 实现 `StlStubPass` (MSVC STL 异常截断桩)**
   - 微软官方 `<vector>` / `<string>` 在关闭异常时会调用 5 个内部例程：
     - `?_Xbad_alloc@std@@YAXXZ`
     - `?_Xlength_error@std@@YAXPEBD@Z`
@@ -75,7 +75,7 @@ flowchart TD
   - 在 IR 中自动合成这 5 个函数，其实现直接内联调用 `kernel32!ExitProcess(STATUS_FAILURE)`。
   - 阻断 `<xmemory>` 中的 `stdext::exception` 继承树与 RTTI 污染。
 
-- [ ] **Task 1.3: 基础容器验证测试**
+- [x] **Task 1.3: 基础容器验证测试**
   - 编写 `tests/test_cpp_stl_basic.cpp`：
     ```cpp
     #include <windows.h>
@@ -94,17 +94,17 @@ flowchart TD
 ### 阶段二：全局对象生命周期与构造序列化 (Phase 2)
 > **目标**：让包含复杂构造函数的全局/静态 C++ 对象（`MyClass g_obj;`）能够正常初始化。
 
-- [ ] **Task 2.1: 实现 `GlobalConstructorPass`**
+- [x] **Task 2.1: 实现 `GlobalConstructorPass`**
   - 在 IR 遍历阶段检索全局元数据 `@llvm.global_ctors`。
   - 提取数据结构中的元素：`{ i32 priority, void ()* func, i8* data }`。
   - 按照优先级（priority 由小到大）对构造函数列表进行排序。
 
-- [ ] **Task 2.2: 构造函数调用前插与元数据擦除**
+- [x] **Task 2.2: 构造函数调用前插与元数据擦除**
   - 定位 `findOrSynthesizeEntryPoint` 确定的 `main` 入口函数。
   - 使用 `IRBuilder` 在 `main` 的首个 BasicBlock 顶端依次插入对所有全局构造函数的 `CallInst`。
   - 彻底将 `@llvm.global_ctors` 从 `Module` 中 `eraseFromParent()`，消除链接器产生 `.CRT$XCU` 段和 `ADDR64` 重定位的可能。
 
-- [ ] **Task 2.3: 全局对象验证测试**
+- [x] **Task 2.3: 全局对象验证测试**
   - 编写 `tests/test_cpp_global_obj.cpp`：
     测试拥有动态分配与初始化的全局类对象，验证其在 `main` 执行前成员变量是否已正确初始化。
 
@@ -113,36 +113,37 @@ flowchart TD
 ### 阶段三：虚函数与多态支持 (Phase 3)
 > **目标**：让 C++ 核心支柱——类继承、虚函数重写（`virtual` / `override`）在扁平二进制中安全运行。
 
-- [ ] **Task 3.1: 虚表相对化重定位机制 (`VTableRebasePass`)**
+- [x] **Task 3.1: 虚表相对化重定位机制 (`GlobalPointerPass`)**
   - 识别 C++ 虚表全局结构体（名称以 `??_7` 开头）。
   - 在 `main` 的首行构造逻辑之前，插入一段极简的动态重定位循环：
     - 读取当前的运行时基地址 `Rip`；
     - 遍历虚表中的函数指针偏移，将每个指针现场修正为当前加载基地址对应的物理函数入口。
 
-- [ ] **Task 3.2: 动态多态验证测试**
+- [x] **Task 3.2: 动态多态验证测试**
   - 编写 `tests/test_cpp_polymorphism.cpp`：
     测试基类指针调用派生类虚函数，验证在任意 `VirtualAlloc` 内存地址执行时无访问越界崩溃。
 
 ---
 
 ### 阶段四：端到端实战迁移与跨代验证 (Phase 4)
-> **目标**：将 3D GDI 软件光栅化渲染器完全迁移为面向对象现代 C++，验证老系统兼容性。
+> **目标**：将 3D 渲染器完全迁移为面向对象现代 C++，并升级至硬件加速 DirectX 11 渲染管线，验证老系统兼容性。
 
-- [ ] **Task 4.1: 更新构建脚本**
+- [x] **Task 4.1: 更新构建脚本**
   - 升级 `tests/build_gui_window.bat`：
-    - 增加 `/clang:-x c++` 与 `/clang:-fno-threadsafe-statics`
+    - 增加 `/clang:-x /clang:c++` 与 `/D_HAS_EXCEPTIONS=0`
     - 保留 `/clang:-ffreestanding`、`/GS-`、`/nodefaultlib`
-    - 保留段合并 `/merge:.rdata=.text /merge:.data=.text`
+    - 段合并 `/merge:.rdata=.text`
 
-- [ ] **Task 4.2: 用现代 C++ 重构 3D 渲染器 (`gui_window.cpp`)**
-  - 引入 RAII 类 `ScopedDC`、`DIBCanvas` 自动释放 GDI 句柄；
-  - 引入 `std::vector<Triangle>` 管理三维网格面；
-  - 引入面向对象的 `Camera`、`Rasterizer` 类。
+- [x] **Task 4.2: 升级至硬件加速 DirectX 11 3D 渲染器 (`gui_window.cpp`)**
+  - 引入 RAII `ComPtr<T>` 模板类管理 Direct3D 11 核心资源；
+  - 纯硬件加速渲染管道（ID3D11Device、SwapChain、RenderTargetView、DepthStencilView）；
+  - 离线字节码嵌入（`simple.hlsl` -> `vs_bytecode.h` & `ps_bytecode.h`），彻底摆脱 `d3dcompiler_47.dll` 运行时依赖；
+  - 实现真实 3D 透视投影、Z-Buffer 深度测试、彩虹渐变多面体、鼠标交互拖拽旋转及 60 FPS VSync 消息泵。
 
-- [ ] **Task 4.3: 纯净 Windows 7 兼容性双重核验**
-  - 检查生成的符号表与导入表，确认绝无任何对 `msvcp140.dll`、`vcruntime140.dll`、`ucrtbase.dll` 的索取；
-  - 确认所有基础运行时（内存、数学）完全收敛于 `kernel32.dll` 与 `msvcrt.dll`；
-  - 验证最终产物体积依然稳定在 **5 KB 左右**。
+- [x] **Task 4.3: 纯净 Windows 7 兼容性双重核验**
+  - 检查生成的符号表与导入表，确认绝无任何对 `msvcp140.dll`、`vcruntime140.dll`、`ucrtbase.dll` 或外部 D3D 编译器的索取；
+  - 依赖完全收敛于 Windows 7 SP1 原生自带的 `d3d11.dll`、`msvcrt.dll` 与 `user32.dll`；
+  - 最终产物体积仅 **10.4 KB (10,724 bytes)**，依然为纯扁平裸机器码（Offset 0x00 入口，无 PE 头部）。
 
 ---
 
