@@ -635,9 +635,13 @@ static bool canTransformGlobalString(GlobalVariable *GV) {
 
   SmallVector<uint8_t, 64> Bytes;
   if (auto *CDS = dyn_cast<ConstantDataSequential>(Init)) {
+    if (!CDS->getElementType()->isIntegerTy(8) && !CDS->getElementType()->isIntegerTy(16))
+      return false;
     StringRef Raw = CDS->getRawDataValues();
     Bytes.append(Raw.bytes_begin(), Raw.bytes_end());
   } else if (auto *CA = dyn_cast<ConstantArray>(Init)) {
+    if (!CA->getType()->getElementType()->isIntegerTy(8) && !CA->getType()->getElementType()->isIntegerTy(16))
+      return false;
     for (unsigned i = 0; i < CA->getNumOperands(); ++i) {
       if (auto *CI = dyn_cast<ConstantInt>(CA->getOperand(i))) {
         Bytes.push_back(static_cast<uint8_t>(CI->getZExtValue()));
@@ -649,7 +653,13 @@ static bool canTransformGlobalString(GlobalVariable *GV) {
     return false;
   }
 
-  if (Bytes.empty())
+  if (Bytes.empty() || Bytes.size() > 256)
+    return false;
+
+  bool isStringSymbol = GV->getName().starts_with("??_C@") || 
+                        GV->getName().contains(".str") ||
+                        (Bytes.size() > 0 && Bytes.back() == 0);
+  if (!isStringSymbol)
     return false;
 
   SmallVector<User *, 16> Users(GV->user_begin(), GV->user_end());
@@ -754,7 +764,7 @@ static bool transformGlobalString(GlobalVariable *GV, Module &M) {
     Type *I8Ty = Type::getInt8Ty(Ctx);
     ArrayType *ArrTy = ArrayType::get(I8Ty, N);
     AllocaInst *Alloca = Builder.CreateAlloca(ArrTy, nullptr, "stack_str");
-    Alloca->setAlignment(Align(8));
+    Alloca->setAlignment(Align(16));
 
     size_t Offset = 0;
     while (Offset + 8 <= N) {

@@ -5,12 +5,41 @@ static void *g_Base = NULL;
 static size_t g_Size = 0;
 
 static LONG WINAPI VectoredHandler(PEXCEPTION_POINTERS pEp) {
+    DWORD code = pEp->ExceptionRecord->ExceptionCode;
+    // Filter out DirectX internal driver probing first-chance C++ exceptions
+    if (code == 0xE06D7363) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     ULONG_PTR rip = (ULONG_PTR)pEp->ContextRecord->Rip;
     ULONG_PTR base = (ULONG_PTR)g_Base;
+    HMODULE hMod = NULL;
+    char modName[MAX_PATH] = "Unknown";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)rip, &hMod)) {
+        GetModuleFileNameA(hMod, modName, MAX_PATH);
+    }
+
+    printf("\n[-] Crash detected! Exception Code: 0x%08lX, Address: 0x%p (Module: %s)\n",
+           code, (void*)rip, modName);
+    if (code == 0xC0000005) {
+        printf("    Access Violation: Type=%s, TargetAddress=0x%p\n",
+               pEp->ExceptionRecord->ExceptionInformation[0] == 0 ? "READ" : "WRITE",
+               (void*)pEp->ExceptionRecord->ExceptionInformation[1]);
+    }
     if (rip >= base && rip < base + g_Size) {
-        printf("\n[-] Crash inside shellcode! Address: 0x%p (Offset: 0x%zX)\n",
-               (void*)rip, rip - base);
-        printf("[-] Exception Code: 0x%08lX\n", pEp->ExceptionRecord->ExceptionCode);
+        printf("    Inside shellcode! Offset: 0x%zX\n", rip - base);
+    } else {
+        printf("    Outside shellcode! (e.g. in system DLL / driver)\n");
+        ULONG_PTR *stack = (ULONG_PTR*)pEp->ContextRecord->Rsp;
+        for (int i = 0; i < 32; i++) {
+            ULONG_PTR addr = stack[i];
+            if (addr >= base && addr < base + g_Size) {
+                printf("    -> Shellcode Caller Return Addr: 0x%p (Offset: 0x%zX)\n",
+                       (void*)addr, addr - base);
+                break;
+            }
+        }
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }

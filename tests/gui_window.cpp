@@ -9,7 +9,7 @@
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "msvcrt.lib")
 
-int _fltused = 0x9876;
+extern "C" const int _fltused = 0x9876;
 
 #pragma function(memcpy)
 extern "C" void* memcpy(void* dest, const void* src, size_t count) {
@@ -50,7 +50,8 @@ public:
     }
 
     T* Get() const { return m_ptr; }
-    T** GetAddressOf() { Release(); return &m_ptr; }
+    T** GetAddressOf() { return &m_ptr; }
+    T** ReleaseAndGetAddressOf() { Release(); return &m_ptr; }
     T** operator&() { Release(); return &m_ptr; }
     T* operator->() const { return m_ptr; }
     operator T*() const { return m_ptr; }
@@ -257,10 +258,26 @@ public:
         if (FAILED(hr)) return false;
 
         // Create Input Layout
-        D3D11_INPUT_ELEMENT_DESC layout[] = {
-            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-            { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
-        };
+        char szPos[] = "POSITION";
+        char szCol[] = "COLOR";
+        D3D11_INPUT_ELEMENT_DESC layout[2];
+        memset(layout, 0, sizeof(layout));
+        layout[0].SemanticName = szPos;
+        layout[0].SemanticIndex = 0;
+        layout[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+        layout[0].InputSlot = 0;
+        layout[0].AlignedByteOffset = 0;
+        layout[0].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+        layout[0].InstanceDataStepRate = 0;
+
+        layout[1].SemanticName = szCol;
+        layout[1].SemanticIndex = 0;
+        layout[1].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        layout[1].InputSlot = 0;
+        layout[1].AlignedByteOffset = 12;
+        layout[1].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+        layout[1].InstanceDataStepRate = 0;
+
         hr = m_device->CreateInputLayout(layout, 2, g_vs_main, sizeof(g_vs_main), &m_inputLayout);
         if (FAILED(hr)) return false;
 
@@ -320,6 +337,14 @@ public:
         dsd.DepthEnable = TRUE;
         dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
         dsd.DepthFunc = D3D11_COMPARISON_LESS;
+        dsd.StencilEnable = FALSE;
+        dsd.StencilReadMask = D3D11_DEFAULT_STENCIL_READ_MASK;
+        dsd.StencilWriteMask = D3D11_DEFAULT_STENCIL_WRITE_MASK;
+        dsd.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+        dsd.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+        dsd.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+        dsd.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+        dsd.BackFace = dsd.FrontFace;
         m_device->CreateDepthStencilState(&dsd, &m_depthStencilState);
 
         return true;
