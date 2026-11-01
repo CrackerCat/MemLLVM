@@ -273,7 +273,25 @@ The recommended workflow is to use the pre-packaged SDK from GitHub Releases and
    - **Smart Path Migration**: If you ever move the SDK folder to a different directory or machine in the future, simply re-run `setup_env.bat` in the new location; it automatically purges the old stale paths and updates to the new location without creating duplicates.
    - *(To uninstall at any time: run `setup_env.bat --uninstall`)*.
 
-### 2. Native Visual Studio Project (.vcxproj) Integration
+### 2. How to Install Clang in Visual Studio (Easiest Way & Extension)
+
+To compile with `clang-cl` in Visual Studio, choose either of the two simplest methods:
+
+* **Method 1: Visual Studio Installer (Recommended Built-in Component, Zero Configuration)**
+  1. Open **Visual Studio Installer** from your Windows Start Menu.
+  2. Click **Modify** on your Visual Studio installation.
+  3. Go to the **Individual components** tab.
+  4. In the search box, type `Clang`.
+  5. Check **C++ Clang Compiler for Windows** and **MSBuild support for LLVM toolset**.
+  6. Click **Modify** to install. After installation, `LLVM (clang-cl)` will immediately appear in your project's **Platform Toolset** dropdown.
+
+* **Method 2: Visual Studio Extension (For Custom / Latest LLVM Versions)**
+  1. In Visual Studio, go to top menu: **Extensions** -> **Manage Extensions**.
+  2. Search for: **`LLVM Compiler Toolchain`** (Official extension by The LLVM Project).
+  3. Click **Download**, close Visual Studio, and follow the VSIX prompt to install.
+  4. This extension enables seamless switching and auto-detection of any external LLVM version in Visual Studio's Platform Toolset.
+
+### 3. Native Visual Studio Project (.vcxproj) Integration
 1. Open your Visual Studio project properties.
 2. **General** -> **Platform Toolset**: Select **LLVM (clang-cl)**.
 3. **C/C++** -> **General** -> **Additional Include Directories**:
@@ -486,7 +504,27 @@ MemLLVM 致力于在纯内存扁平二进制中提供尽可能强大的现代化
    - **智能迁移防冗余**：未来若将 SDK 整体移动或解压到新的文件夹，直接在新目录下再次双击 `setup_env.bat`，脚本会自动识别并清理旧目录残留，智能无缝迁移至最新路径，绝不重复堆叠垃圾路径。
    - *(如需彻底卸载，在命令行执行 `setup_env.bat --uninstall` 即可完全擦除)*。
 
-### 第二步：原生 Visual Studio 项目（.vcxproj）对接配置
+### 第二步：Visual Studio 安装 Clang / LLVM（最简官方组件与扩展插件）
+
+要在 Visual Studio 中启用 `clang-cl` 工具链，以下两种方式均极其简单：
+
+* **方式一：通过 Visual Studio Installer 一键安装官方内置组件（最推荐，开箱即用，零额外配置）**
+  1. 打开 Windows 开始菜单中的 **Visual Studio Installer**。
+  2. 找到当前正在使用的 Visual Studio 版本，点击 **修改 (Modify)**。
+  3. 切换到 **“单个组件” (Individual components)** 标签页。
+  4. 在右上角搜索框中输入：`Clang`。
+  5. 勾选以下组件：
+     - **适用于 Windows 的 C++ Clang 编译器** (C++ Clang Compiler for Windows)
+     - **适用于 Windows 的 C++ Clang-cl** 或 **LLVM 工具集 MSBuild 支持** (MSBuild support for LLVM toolset)
+  6. 点击右下角 **修改** 开始自动安装。安装完成后，VS 工程属性的“平台工具集”下拉框中会直接出现 **`LLVM (clang-cl)`** 选项！
+
+* **方式二：通过 Visual Studio 官方扩展插件（适合对接任意独立安装的最新版 LLVM）**
+  1. 打开 Visual Studio，点击顶部菜单栏：**扩展 (Extensions)** -> **管理扩展 (Manage Extensions)**。
+  2. 在右上角搜索框中输入：`LLVM` 或 `LLVM Compiler Toolchain`。
+  3. 找到并点击下载官方插件 **`LLVM Compiler Toolchain`**（由 The LLVM Project 官方出品）。
+  4. 关闭 Visual Studio，VSIX 安装器会自动弹出并完成安装。该插件能自动检索并识别系统中安装的任何外部 LLVM 发行版，并在平台工具集中直接供您选择。
+
+### 第三步：原生 Visual Studio 项目（.vcxproj）对接配置
 在 Visual Studio 中打开已有或新建的 C++ 项目，右键打开 **项目属性**：
 
 1. **常规** -> **平台工具集**：选择 **LLVM (clang-cl)**。
