@@ -72,7 +72,9 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
     {"?_Xruntime_error@std@@YAXPEBD@Z",        0xC0000001},
     {"_invalid_parameter_noinfo_noreturn",     0xC000000D},
     {"_CxxThrowException",                     0xE06D7363},
-    {"_purecall",                              0xC0000025}
+    {"_purecall",                              0xC0000025},
+    {"?_Xregex_error@std@@YAXW4error_type@regex_constants@1@@Z", 0xC0000002},
+    {"?_Xbad_function_call@std@@YAXXZ",        0xC0000003}
   };
 
   for (const auto &s : stubs) {
@@ -87,8 +89,6 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
     "?_Set_raise_handler@std@@YAP6AXAEBVexception@stdext@@@ZP6AX0@Z@Z",
     "?uncaught_exception@std@@YA_NXZ",
     "?uncaught_exceptions@std@@YAHXZ",
-    "?_Init@locale@std@@CAPEAV_Locimp@12@_N@Z",
-    "?_Getgloballocale@locale@std@@CAPEAV_Locimp@12@XZ",
     "_Init_thread_lock",
     "_Init_thread_unlock"
   };

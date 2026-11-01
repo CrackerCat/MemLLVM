@@ -28,10 +28,18 @@ static bool isStaticShimSymbol(StringRef Name) {
       Name.starts_with("_Thrd_") || Name.starts_with("__emutls_") || 
       Name.starts_with("__std_") ||
       Name.contains("@std@@") || Name.contains("@stdext@@") ||
+      Name.contains("@Concurrency@@") ||
       Name.starts_with("?cout@") || Name.starts_with("?cerr@") || Name.starts_with("?cin@") ||
       Name.starts_with("?_Throw_Cpp_error@") ||
       Name.starts_with("_Smtx_") || Name == "_beginthreadex" ||
       Name.starts_with("MemLLVM_") || Name.starts_with("_MemLLVM_") ||
+      Name == "_Getctype" || Name == "_Tolower" || Name == "_Toupper" ||
+      Name == "_Getcoll" || Name == "_Getcvt" || Name == "_Getdateorder" ||
+      Name == "_Strcoll" || Name == "_Strxfrm" || Name == "_Wcscoll" ||
+      Name == "_Mbrtowc" || Name == "_Wcrtomb" ||
+      Name == "_get_stream_buffer_pointers" ||
+      Name == "_lock_file" || Name == "_unlock_file" ||
+      Name.contains("__ExceptionPtr") ||
       Name == "memcpy" || Name == "memmove" || Name == "memset") {
     return true;
   }

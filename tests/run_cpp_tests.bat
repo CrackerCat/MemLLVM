@@ -1,7 +1,7 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 echo =======================================================================
-echo   MemLLVM Full Modern C++ Regression Test Suite (11 Tests)
+echo   MemLLVM Full Modern C++ Regression Test Suite (16 Tests)
 echo =======================================================================
 
 set CLANG_BIN=C:\LLVM-22-dev\bin\clang-cl.exe
@@ -113,7 +113,53 @@ if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 echo [Test 11 Status: %ERRORLEVEL%]
 
 echo.
+echo [*] Compiling and running Test 12: std::fstream (ifstream, ofstream, std::locale, std::ctype)...
+"%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_fstream.cpp /Fo:D:\MemLLVM\tests\test_cpp_fstream.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_fstream.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_fstream.exe
+"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_fstream.bin D:\MemLLVM\tests\test_cpp_fstream.exe
+"%RUNNER%" D:\MemLLVM\tests\test_cpp_fstream.bin
+echo [Test 12 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 13: std::cin console stream input...
+"%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_cin.cpp /Fo:D:\MemLLVM\tests\test_cpp_cin.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_cin.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_cin.exe
+"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_cin.bin D:\MemLLVM\tests\test_cpp_cin.exe
+echo World | "%RUNNER%" D:\MemLLVM\tests\test_cpp_cin.bin
+echo [Test 13 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 14: std::regex and std::regex_search...
+"%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_regex.cpp /Fo:D:\MemLLVM\tests\test_cpp_regex.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_regex.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_regex.exe
+"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_regex.bin D:\MemLLVM\tests\test_cpp_regex.exe
+"%RUNNER%" D:\MemLLVM\tests\test_cpp_regex.bin
+echo [Test 14 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 15: std::async, std::future, std::promise...
+"%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_async.cpp /Fo:D:\MemLLVM\tests\test_cpp_async.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_async.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_async.exe
+"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_async.bin D:\MemLLVM\tests\test_cpp_async.exe
+"%RUNNER%" D:\MemLLVM\tests\test_cpp_async.bin
+echo [Test 15 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 16: C++20 Standard Module (import std;)...
+set MODULE_FLAGS=/std:c++20 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang:-fno-builtin /clang:-mno-stack-arg-probe /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" "/clang:-fmodule-file=std=D:\MemLLVM\ltl\modules\std.pcm" -O2
+"%CLANG_BIN%" %MODULE_FLAGS% -c D:\MemLLVM\tests\test_cpp_module_std.cpp /Fo:D:\MemLLVM\tests\test_cpp_module_std.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_module_std.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_module_std.exe
+"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_module_std.bin D:\MemLLVM\tests\test_cpp_module_std.exe
+"%RUNNER%" D:\MemLLVM\tests\test_cpp_module_std.bin
+echo [Test 16 Status: %ERRORLEVEL%]
+
+echo.
 echo =======================================================================
-echo   ALL 11 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
+echo   ALL 16 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
 echo =======================================================================
 endlocal

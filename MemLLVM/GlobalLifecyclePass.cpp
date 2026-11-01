@@ -77,7 +77,8 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
   // Auto-initialize std::cout / std::cerr if referenced in entry module
   if (EntryFn && !EntryFn->empty()) {
     if (M.getGlobalVariable("?cout@std@@3V?$basic_ostream@DU?$char_traits@D@std@@@1@A") ||
-        M.getGlobalVariable("?cerr@std@@3V?$basic_ostream@DU?$char_traits@D@std@@@1@A")) {
+        M.getGlobalVariable("?cerr@std@@3V?$basic_ostream@DU?$char_traits@D@std@@@1@A") ||
+        M.getGlobalVariable("?cin@std@@3V?$basic_istream@DU?$char_traits@D@std@@@1@A")) {
       LLVMContext &Ctx = M.getContext();
       FunctionCallee InitCoutFn = M.getOrInsertFunction("MemLLVM_InitCout",
           FunctionType::get(Type::getVoidTy(Ctx), false));

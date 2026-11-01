@@ -141,7 +141,12 @@ static bool transformGlobalString(GlobalVariable *GV, Module &M) {
 
               if (UsesGV) {
                 Instruction *NewInst = CE->getAsInstruction();
-                NewInst->insertBefore(I.getIterator());
+                if (auto *PN = dyn_cast<PHINode>(&I)) {
+                  BasicBlock *PredBB = PN->getIncomingBlock(op);
+                  NewInst->insertBefore(PredBB->getTerminator()->getIterator());
+                } else {
+                  NewInst->insertBefore(I.getIterator());
+                }
                 I.setOperand(op, NewInst);
                 Changed = true;
                 break;

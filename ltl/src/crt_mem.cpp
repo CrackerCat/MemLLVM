@@ -7,6 +7,8 @@
 
 extern "C" {
 
+int _fltused = 0x9875;
+
 #pragma function(memcpy)
 void* memcpy(void* dest, const void* src, size_t count) {
     char* d = static_cast<char*>(dest);
