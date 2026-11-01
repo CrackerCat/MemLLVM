@@ -264,14 +264,14 @@ MemLLVM has been tested and verified across major industrial-grade C and C++ pro
 
 The recommended workflow is to use the pre-packaged SDK from GitHub Releases and configure the `MEMLLVM_DIR` environment variable.
 
-### 1. Download & Extract SDK
+### 1. Download & One-Click Environment Setup
 1. Download `MemLLVM-SDK-windows-x64.zip` (and optional `MemLLVM-Tests.zip` for representative C++ test cases) from the latest [GitHub Release](https://github.com/Laster-dev/MemLLVM/releases).
 2. Extract the archive to any directory on your system (e.g., `C:\MemLLVM`).
-3. Add the environment variable `MEMLLVM_DIR`:
-   ```powershell
-   [System.Environment]::SetEnvironmentVariable("MEMLLVM_DIR", "C:\MemLLVM", "User")
-   ```
-   *(Optional)* Add `%MEMLLVM_DIR%\bin` to your system `PATH`.
+3. **Double-click `setup_env.bat` in the extracted root folder**:
+   - Automatically detects the current directory and sets `MEMLLVM_DIR` in your User Environment.
+   - Automatically mounts `bin` and `Tools` into your User `PATH`.
+   - **Smart Path Migration**: If you ever move the SDK folder to a different directory or machine in the future, simply re-run `setup_env.bat` in the new location; it automatically purges the old stale paths and updates to the new location without creating duplicates.
+   - *(To uninstall at any time: run `setup_env.bat --uninstall`)*.
 
 ### 2. Native Visual Studio Project (.vcxproj) Integration
 1. Open your Visual Studio project properties.
@@ -477,14 +477,14 @@ MemLLVM 致力于在纯内存扁平二进制中提供尽可能强大的现代化
 
 使用 MemLLVM 的最简方案是直接下载 GitHub Release 提供的预打包 SDK，并通过环境变量无痛融入工程，无需在项目中写死任何机器绝对路径。
 
-### 第一步：下载并配置 SDK 环境变量
+### 第一步：下载并一键配置 SDK 环境变量
 1. 前往 [MemLLVM GitHub Releases](https://github.com/Laster-dev/MemLLVM/releases) 下载最新的 `MemLLVM-SDK-windows-x64.zip`（若需测试各类 C++20 特性样例，可一并下载 `MemLLVM-Tests.zip` 测试包）。
 2. 解压到本地任意目录（例如 `C:\MemLLVM`）。
-3. 添加系统或用户环境变量 `MEMLLVM_DIR` 指向解压目录：
-   ```powershell
-   [System.Environment]::SetEnvironmentVariable("MEMLLVM_DIR", "C:\MemLLVM", "User")
-   ```
-   *（可选）将 `%MEMLLVM_DIR%\bin` 添加至系统的 `PATH` 环境变量中。*
+3. **直接双击运行根目录下的 `setup_env.bat`**：
+   - 自动获取当前目录，并一键配置用户环境变量 `MEMLLVM_DIR`。
+   - 自动将当前目录下的 `bin` 与 `Tools` 挂载到用户 `PATH`（支持终端直接运行 `SCLoader.exe` 等工具）。
+   - **智能迁移防冗余**：未来若将 SDK 整体移动或解压到新的文件夹，直接在新目录下再次双击 `setup_env.bat`，脚本会自动识别并清理旧目录残留，智能无缝迁移至最新路径，绝不重复堆叠垃圾路径。
+   - *(如需彻底卸载，在命令行执行 `setup_env.bat --uninstall` 即可完全擦除)*。
 
 ### 第二步：原生 Visual Studio 项目（.vcxproj）对接配置
 在 Visual Studio 中打开已有或新建的 C++ 项目，右键打开 **项目属性**：

@@ -82,10 +82,12 @@ jobs:
           # 4. Tools (SCLoader GUI runner)
           Copy-Item "Tools/SCLoader.exe" "$sdk/Tools/" -Force
 
-          # 5. Full Source Code
+          # 5. Full Source Code & Setup Scripts
           Copy-Item -Recurse "MemLLVM/*" "$sdk/src/" -Force
           Copy-Item "CMakeLists.txt" "$sdk/" -Force
           Copy-Item "readme.md" "$sdk/" -Force
+          Copy-Item "setup_env.bat" "$sdk/" -Force
+          Copy-Item "setup_env.ps1" "$sdk/" -Force
 
           # 6. Examples
           Copy-Item -Recurse "examples/*" "$sdk/examples/" -Force
@@ -140,6 +142,7 @@ jobs:
 
             ### Release Assets:
             - **`MemLLVM-SDK-windows-x64.zip`**: Complete SDK archive containing:
+              - `setup_env.bat`: One-click environment variable setup & auto-updater (detects current directory, sets `MEMLLVM_DIR` and updates `PATH`; automatically migrates old paths on repeated runs in new locations)
               - `bin/`: `MemLLVM.dll` LLVM Pass Plugin
               - `lib/`: `MemLLVM.lib` import library
               - `include/`: Pass headers & API definitions
