@@ -265,7 +265,7 @@ MemLLVM has been tested and verified across major industrial-grade C and C++ pro
 The recommended workflow is to use the pre-packaged SDK from GitHub Releases and configure the `MEMLLVM_DIR` environment variable.
 
 ### 1. Download & Extract SDK
-1. Download `MemLLVM-SDK-windows-x64.zip` from the latest [GitHub Release](https://github.com/Laster-dev/MemLLVM/releases).
+1. Download `MemLLVM-SDK-windows-x64.zip` (and optional `MemLLVM-Tests.zip` for representative C++ test cases) from the latest [GitHub Release](https://github.com/Laster-dev/MemLLVM/releases).
 2. Extract the archive to any directory on your system (e.g., `C:\MemLLVM`).
 3. Add the environment variable `MEMLLVM_DIR`:
    ```powershell
@@ -478,7 +478,7 @@ MemLLVM 致力于在纯内存扁平二进制中提供尽可能强大的现代化
 使用 MemLLVM 的最简方案是直接下载 GitHub Release 提供的预打包 SDK，并通过环境变量无痛融入工程，无需在项目中写死任何机器绝对路径。
 
 ### 第一步：下载并配置 SDK 环境变量
-1. 前往 [MemLLVM GitHub Releases](https://github.com/Laster-dev/MemLLVM/releases) 下载最新的 `MemLLVM-SDK-windows-x64.zip`。
+1. 前往 [MemLLVM GitHub Releases](https://github.com/Laster-dev/MemLLVM/releases) 下载最新的 `MemLLVM-SDK-windows-x64.zip`（若需测试各类 C++20 特性样例，可一并下载 `MemLLVM-Tests.zip` 测试包）。
 2. 解压到本地任意目录（例如 `C:\MemLLVM`）。
 3. 添加系统或用户环境变量 `MEMLLVM_DIR` 指向解压目录：
    ```powershell

@@ -94,6 +94,26 @@ jobs:
           Compress-Archive -Path "$sdk/*" -DestinationPath "MemLLVM-SDK-windows-x64.zip" -Force
           Write-Host "[+] Created MemLLVM-SDK-windows-x64.zip ($((Get-Item 'MemLLVM-SDK-windows-x64.zip').Length / 1024.0) KB)"
 
+      - name: Package Tests Distribution Archive
+        shell: pwsh
+        run: |
+          $tempDir = "temp_tests_pkg/tests"
+          if (Test-Path "temp_tests_pkg") { Remove-Item -Recurse -Force "temp_tests_pkg" }
+          New-Item -ItemType Directory -Path $tempDir -Force
+
+          $files = Get-ChildItem "tests" -File | Where-Object { 
+            $_.Extension -in @(".cpp", ".c", ".bin", ".bat", ".h", ".txt") -and
+            $_.Name -notmatch '\.ll$' -and $_.Name -notmatch '\.pcm$'
+          }
+
+          foreach ($f in $files) {
+            Copy-Item $f.FullName -Destination $tempDir -Force
+          }
+
+          Compress-Archive -Path "temp_tests_pkg/*" -DestinationPath "MemLLVM-Tests.zip" -Force
+          Remove-Item -Recurse -Force "temp_tests_pkg"
+          Write-Host "[+] Created MemLLVM-Tests.zip ($([math]::Round((Get-Item 'MemLLVM-Tests.zip').Length / 1024.0, 2)) KB)"
+
       - name: Generate Release Tag & Date
         id: release_info
         shell: pwsh
@@ -127,6 +147,7 @@ jobs:
               - `Tools/`: `SCLoader.exe` interactive GUI payload runner & debugger
               - `src/`: Complete C++ source code of all LLVM passes
               - `examples/`: Box2D, CHIP-8, DOOM, ImGui full example projects
+            - **`MemLLVM-Tests.zip`**: Representative modern C and C++ test suite containing source `.cpp` files, compiled `.bin` flat binaries, batch verification scripts, and test assets
             - **`Tools/SCLoader.exe`**: Modern CUI-based GUI Shellcode & Payload Loader
             - **`box2d.bin`**: Erin Catto's Box2D 2D Rigid Body Physics Engine Flat Binary
             - **`chip8.bin`**: Full CHIP-8 CPU / Sound Virtual Machine Flat Binary
@@ -135,6 +156,7 @@ jobs:
             - **`imgui_demo.bin`**: Dear ImGui DirectX 11 Immediate-Mode GUI Flat Binary
           files: |
             MemLLVM-SDK-windows-x64.zip
+            MemLLVM-Tests.zip
             Tools/SCLoader.exe
             release_artifacts/box2d.bin
             release_artifacts/chip8.bin
