@@ -1,5 +1,6 @@
 #include "MemLLVM.h"
 #include "MemLLVMUtils.h"
+#include "SdkImportResolver.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
@@ -14,6 +15,7 @@
 
 #include <functional>
 #include <set>
+#include <string>
 
 using namespace llvm;
 
@@ -58,13 +60,22 @@ static Constant *replacePointerLeavesWithNull(Constant *C) {
 
 PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) {
   Function *EntryFn = findOrSynthesizeEntryPoint(M);
-  if (!EntryFn || EntryFn->empty())
-    return PreservedAnalyses::all();
+  const bool HasEntry = EntryFn && !EntryFn->empty();
+  // NOTE: no early return here. A TU without an entry point (sqlite3.c and most
+  // library TUs) still owns global pointer tables that must be filled at run
+  // time; those stores go into a per-TU init function which the entry TU
+  // dispatches through the .mli$M table.
 
   struct PointerRebaseEntry {
     GlobalVariable *GV;
     SmallVector<uint32_t, 4> Path;
     Constant *Target;
+    // Non-zero when the slot points at an address-taken Win32 export. Such a
+    // slot cannot be filled with a link-time address (the symbol does not exist
+    // in a flat image), so it is instead populated at entry time through the
+    // PEB + ROR13 resolver.
+    uint32_t DynamicHash = 0;
+    std::string DynamicName;
   };
 
   std::function<void(GlobalVariable *, Constant *, SmallVector<uint32_t, 4> &, SmallVector<PointerRebaseEntry, 16> &)>
@@ -78,6 +89,22 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
         Entry.GV = GV;
         Entry.Path = CurPath;
         Entry.Target = C;
+
+        // Address-taken external API, e.g. sqlite3's `aSyscall` table, which
+        // stores &CreateFileW / &WriteFile / &HeapAlloc as data. ApiResolvePass
+        // only rewrites call sites, so without this these references survive
+        // all the way to the linker as undefined imports.
+        if (auto *F = dyn_cast<Function>(C->stripPointerCasts())) {
+          if (F->isDeclaration() && !F->isIntrinsic() &&
+              !F->getName().starts_with("llvm.") &&
+              F->getName() != "MemLLVM_GetApiAddress" &&
+              !isStaticShimSymbol(F->getName()) &&
+              isKnownWindowsApi(F->getName())) {
+            Entry.DynamicHash = calculateRor13(F->getName());
+            Entry.DynamicName = F->getName().str();
+          }
+        }
+
         Out.push_back(Entry);
       }
       return;
@@ -129,18 +156,42 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
   errs() << "[MemLLVM] Running GlobalPointerPass: auto-rebasing " 
          << Rebases.size() << " pointer slot(s) across " << ModifiedGVs.size() << " global(s)\n";
 
-  Instruction *InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
-  for (Instruction &I : EntryFn->getEntryBlock()) {
-    if (auto *CI = dyn_cast<CallInst>(&I)) {
-      if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "LoadLibraryA") {
-        InsertBefore = I.getNextNode();
+  Instruction *InsertBefore = nullptr;
+  Function *TuInit = nullptr;
+  if (HasEntry) {
+    InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
+    for (Instruction &I : EntryFn->getEntryBlock()) {
+      if (auto *CI = dyn_cast<CallInst>(&I)) {
+        if (getDirectCallee(*CI) && getDirectCallee(*CI)->getName() == "LoadLibraryA") {
+          InsertBefore = I.getNextNode();
+        }
       }
     }
+  } else {
+    TuInit = getOrCreateTuInit(M);
+    InsertBefore = &*TuInit->getEntryBlock().getFirstInsertionPt();
   }
 
   IRBuilder<> Builder(InsertBefore);
   LLVMContext &Ctx = M.getContext();
   Type *Int32Ty = Type::getInt32Ty(Ctx);
+
+  // Declared lazily: only modules with address-taken APIs need it, and
+  // ApiResolvePass links the real body afterwards.
+  FunctionCallee ResolverFn;
+  bool HaveResolver = false;
+  for (auto &Entry : Rebases) {
+    if (Entry.DynamicHash) { HaveResolver = true; break; }
+  }
+  if (HaveResolver) {
+    ResolverFn = M.getOrInsertFunction(
+        "MemLLVM_GetApiAddress",
+        FunctionType::get(PointerType::get(Ctx, 0), {Int32Ty}, false));
+    unsigned NumDynamic = 0;
+    for (auto &Entry : Rebases) if (Entry.DynamicHash) ++NumDynamic;
+    errs() << "[MemLLVM] GlobalPointerPass: resolving " << NumDynamic
+           << " address-taken API pointer(s) via PEB/ROR13 at entry\n";
+  }
 
   for (auto &Entry : Rebases) {
     Value *SlotPtr = nullptr;
@@ -154,7 +205,15 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
       }
       SlotPtr = Builder.CreateInBoundsGEP(Entry.GV->getValueType(), Entry.GV, GepIndices);
     }
-    Builder.CreateStore(Entry.Target, SlotPtr);
+
+    if (Entry.DynamicHash) {
+      Value *FnPtr = Builder.CreateCall(
+          ResolverFn, {ConstantInt::get(Int32Ty, Entry.DynamicHash)},
+          Entry.DynamicName + ".ptr");
+      Builder.CreateStore(FnPtr, SlotPtr);
+    } else {
+      Builder.CreateStore(Entry.Target, SlotPtr);
+    }
   }
 
   for (GlobalVariable *GV : ModifiedGVs) {
@@ -169,6 +228,12 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
     if (GV->hasSection() && GV->getSection().starts_with(".text")) {
       GV->setSection("");
     }
+  }
+
+  if (!HasEntry) {
+    registerTuInit(M, TuInit);
+    errs() << "[MemLLVM] GlobalPointerPass: initialisation deferred to @"
+           << TuInit->getName() << " (dispatched from the entry TU)\n";
   }
 
   return PreservedAnalyses::none();

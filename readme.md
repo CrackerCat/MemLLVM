@@ -143,7 +143,7 @@ To support complex C++ applications without pulling in the massive, non-PIC Micr
 
 MemLLVM binaries support true **arbitrary base execution** via a hybrid compilation and extraction scheme:
 
-1. **Compilation**: Code is compiled with `-fno-jump-tables`, `/GS-`, `/GR-`, and `-mno-stack-arg-probe`.
+1. **Compilation**: Code is compiled with `-fno-jump-tables`, `/GS-`, and `/GR-`. Builtin stack probe (`__chkstk`) is fully provided by LTL runtime to guarantee guard page expansion across large stack frames.
 2. **Extraction & Relocation Harvesting**: The extractor parses the linked PE executable, gathers all base relocations (`IMAGE_REL_BASED_DIR64`), and appends a compact relocation table to the flat binary.
 3. **ABI-Compliant Self-Rebase Bootstrap Stub**: A lightweight 64-bit assembly preamble is prepended to the binary entry point. It uses only volatile scratch registers (`r8-r11`, `rdx`, `rax`), strictly conforming to the Windows x64 ABI without corrupting callee-saved registers:
 
@@ -303,7 +303,7 @@ To compile with `clang-cl` in Visual Studio, choose either of the two simplest m
    - **Security Check**: Set to **Disable Security Check (/GS-)**.
 5. **C/C++** -> **Command Line** -> **Additional Options**:
    ```text
-   /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll" /clang:-fno-jump-tables /clang:-mno-stack-arg-probe /clang:-fno-builtin
+   /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll" /clang:-fno-jump-tables /clang:-fno-builtin
    ```
 6. **Linker** -> **General** -> **Additional Library Directories**:
    ```text
@@ -315,7 +315,7 @@ To compile with `clang-cl` in Visual Studio, choose either of the two simplest m
 8. **Linker** -> **Advanced** -> **Entry Point**: Set to `main`.
 9. **Build Events** -> **Post-Build Event**:
    ```bat
-   python "$(MEMLLVM_DIR)\examples\imgui\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
+   python "$(MEMLLVM_DIR)\Tools\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
    ```
 
 You can now use `$(MEMLLVM_DIR)\Tools\SCLoader.exe` to run, inspect, and debug the resulting `.bin` file in an isolated memory harness.
@@ -537,7 +537,7 @@ MemLLVM 致力于在纯内存扁平二进制中提供尽可能强大的现代化
    - **安全检查**：选择 **禁用安全检查 (/GS-)**。
 4. **C/C++** -> **命令行** -> **其他选项**：直接添加
    ```text
-   /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll" /clang:-fno-jump-tables /clang:-mno-stack-arg-probe /clang:-fno-builtin
+   /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll" /clang:-fno-jump-tables /clang:-fno-builtin
    ```
 5. **链接器** -> **常规** -> **附加库目录**：添加
    ```text
@@ -549,7 +549,7 @@ MemLLVM 致力于在纯内存扁平二进制中提供尽可能强大的现代化
 7. **链接器** -> **高级** -> **入口点**：填入 `main`。
 8. **生成事件** -> **生成后事件** -> **命令行**：
    ```bat
-   python "$(MEMLLVM_DIR)\examples\imgui\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
+   python "$(MEMLLVM_DIR)\Tools\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
    ```
 
 编译完成后，会在输出目录自动生成绝对位置无关的 `.bin` 文件。您可以使用 SDK 自带的现代化图形执行器 `$(MEMLLVM_DIR)\Tools\SCLoader.exe` 打开此 `.bin` 进行载入、执行与调试。

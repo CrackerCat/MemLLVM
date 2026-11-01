@@ -33,3 +33,19 @@ endif()
 if (MSVC)
   target_compile_options(MemLLVM PRIVATE /W3 /wd4267 /wd4244 /wd4146 /wd4245 /wd4324 /wd4458)
 endif()
+
+# Mirror the freshly built plugin to <repo>/bin/MemLLVM.dll.
+#
+# The integration guide tells external .vcxproj files to use
+#   /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll"
+# but the CMake build only ever produced build/MemLLVM/Release/MemLLVM.dll, so
+# that path either did not exist or held a stale copy -- and a stale plugin
+# fails in the worst possible way (it silently compiles, just without the
+# newest transformations). Keeping bin/ in sync makes the documented path mean
+# what it says.
+add_custom_command(TARGET MemLLVM POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/bin"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE:MemLLVM>" "${CMAKE_SOURCE_DIR}/bin/MemLLVM.dll"
+  COMMENT "Mirroring MemLLVM.dll -> bin/MemLLVM.dll"
+)

@@ -36,8 +36,12 @@ PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM
   }
 
   Function *EntryFn = findOrSynthesizeEntryPoint(M);
-  if (!EntryFn || EntryFn->empty())
-    return PreservedAnalyses::all();
+  // NOTE: no early return here. A TU without an entry point (kull_m_asn1.c and
+  // friends) still needs its subsystem DLLs preloaded, because
+  // MemLLVM_GetApiAddress only walks modules that are already mapped. Bailing
+  // out meant only the entry TU's own DLLs were ever loaded, and every other
+  // TU's API resolution silently returned NULL -> `call 0`.
+  const bool HasEntry = EntryFn && !EntryFn->empty();
 
   std::set<std::string> RequiredDlls;
   for (Function &F : M) {
@@ -46,10 +50,12 @@ PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM
 
     for (BasicBlock &BB : F) {
       for (Instruction &I : BB) {
-        if (auto *CI = dyn_cast<CallInst>(&I)) {
-          if (CI->isInlineAsm())
+        // Match CallBase so that API references inside __try/__except blocks
+        // (lowered to `invoke`) also contribute their owning DLL.
+        if (auto *CB = dyn_cast<CallBase>(&I)) {
+          if (CB->isInlineAsm())
             continue;
-          Function *Callee = CI->getCalledFunction();
+          Function *Callee = getDirectCallee(*CB);
           if (Callee && Callee->isDeclaration() && !Callee->isIntrinsic() &&
               !Callee->getName().starts_with("llvm.") &&
               Callee->getName() != "MemLLVM_GetApiAddress") {
@@ -76,10 +82,22 @@ PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM
   FunctionType *LoadLibType = FunctionType::get(PtrTy, {PtrTy}, false);
   FunctionCallee LoadLibFn = M.getOrInsertFunction("LoadLibraryA", LoadLibType);
 
-  IRBuilder<> Builder(&*EntryFn->getEntryBlock().getFirstInsertionPt());
+  // Pick an injection point: the entry function when this TU has one, otherwise
+  // the cross-TU init that the flat-image stub dispatches through `.mli`.
+  Function *TuInit = nullptr;
+  Instruction *InsertBefore = nullptr;
+  if (HasEntry) {
+    InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
+  } else {
+    TuInit = getOrCreateTuInit(M);
+    InsertBefore = &*TuInit->getEntryBlock().getFirstInsertionPt();
+  }
+
+  IRBuilder<> Builder(InsertBefore);
 
   for (const std::string &dllName : RequiredDlls) {
-    errs() << "[MemLLVM] Proactively injecting LoadLibraryA(\"" << dllName << "\") into entry\n";
+    errs() << "[MemLLVM] Proactively injecting LoadLibraryA(\"" << dllName << "\") into "
+           << (HasEntry ? "entry" : "TU init") << "\n";
     Constant *StrConst = ConstantDataArray::getString(Ctx, dllName, true);
     GlobalVariable *GV = new GlobalVariable(
       M,
@@ -91,6 +109,12 @@ PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM
     );
     GV->setAlignment(Align(1));
     Builder.CreateCall(LoadLibFn, {GV});
+  }
+
+  if (!HasEntry) {
+    registerTuInit(M, TuInit);
+    errs() << "[MemLLVM] AutoLoadLibraryPass: deferred DLL preload to @"
+           << TuInit->getName() << " (dispatched from the entry TU)\n";
   }
 
   return PreservedAnalyses::none();

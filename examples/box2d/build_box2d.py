@@ -86,7 +86,6 @@ DEFINES = [
     "/GS-",
     "/GR-",
     "/clang:-fno-exceptions",
-    "/clang:-mno-stack-arg-probe",
     "/clang:-fno-builtin",
     "-O2",
     "/W0",
@@ -174,11 +173,13 @@ def extract_flat_bin_with_selfrebase(exe_path, out_bin_path):
     with open(exe_path, 'rb') as f:
         exe_data = f.read()
 
+    LOADABLE_SECTIONS = ('.text', '.rdata', '.data', '.bss')
     max_rva = 0
     for s in pe.sections:
         name = s.Name.decode().rstrip('\0')
-        if name in ('.text', '.rdata', '.data'):
-            end = s.VirtualAddress + max(s.Misc_VirtualSize, s.SizeOfRawData)
+        if name in LOADABLE_SECTIONS:
+            span = max(s.Misc_VirtualSize, s.SizeOfRawData)
+            end = s.VirtualAddress + span
             if end > max_rva:
                 max_rva = end
             print(f"  Section {name}: RVA=0x{s.VirtualAddress:X}, Size=0x{s.Misc_VirtualSize:X}, RawSize=0x{s.SizeOfRawData:X}")
@@ -187,10 +188,15 @@ def extract_flat_bin_with_selfrebase(exe_path, out_bin_path):
     flat_buf = bytearray(total_size)
     for s in pe.sections:
         name = s.Name.decode().rstrip('\0')
-        if name in ('.text', '.rdata', '.data'):
+        if name in LOADABLE_SECTIONS:
             off = s.VirtualAddress - base_rva
-            raw = exe_data[s.PointerToRawData : s.PointerToRawData + s.SizeOfRawData]
-            flat_buf[off : off + len(raw)] = raw
+            span = max(s.Misc_VirtualSize, s.SizeOfRawData)
+            if s.SizeOfRawData > 0:
+                raw = exe_data[s.PointerToRawData : s.PointerToRawData + s.SizeOfRawData]
+                flat_buf[off : off + len(raw)] = raw
+            # Explicitly zero any uninitialized/BSS tail (VirtualSize > SizeOfRawData)
+            if span > s.SizeOfRawData:
+                flat_buf[off + s.SizeOfRawData : off + span] = b'\0' * (span - s.SizeOfRawData)
 
     # Extract DIR64 relocations from .reloc
     relocs = []

@@ -199,25 +199,8 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
   }
 
   // =========================================================================
-  // 2. Safe Fallback for atexit / __cxa_atexit
+  // 2. Real atexit / __cxa_atexit are provided by LTL runtime (crt_mem.cpp)
   // =========================================================================
-  const char *atexitNames[] = {"atexit", "__cxa_atexit"};
-  for (const char *name : atexitNames) {
-    if (Function *F = M.getFunction(name)) {
-      if (F->isDeclaration()) {
-        Comdat *C = M.getOrInsertComdat(F->getName());
-        C->setSelectionKind(Comdat::Any);
-        F->setComdat(C);
-        F->setLinkage(GlobalValue::LinkOnceODRLinkage);
-
-        BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
-        IRBuilder<> B(BB);
-        B.CreateRet(ConstantInt::get(F->getReturnType(), 0));
-        Changed = true;
-        errs() << "[MemLLVM] StlStubPass: Synthesized safe fallback " << F->getName() << "\n";
-      }
-    }
-  }
 
   // =========================================================================
   // 3. Native Emulated TLS: Lower llvm.threadlocal.address to MemLLVM_GetThreadLocalAddress

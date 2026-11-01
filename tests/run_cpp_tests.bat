@@ -8,6 +8,7 @@ if not "%LLVM_PATH%"=="" set "LLVM_ROOT=%LLVM_PATH%"
 if "%LLVM_ROOT%"=="" if not "%LLVM_DIR%"=="" set "LLVM_ROOT=%LLVM_DIR%"
 if "%LLVM_ROOT%"=="" if not "%LLVM_HOME%"=="" set "LLVM_ROOT=%LLVM_HOME%"
 
+if "%LLVM_ROOT%"=="" if exist "C:\LLVM-22-dev\bin\clang-cl.exe" set "LLVM_ROOT=C:\LLVM-22-dev"
 if "%CLANG_BIN%"=="" (
     if not "%LLVM_ROOT%"=="" (
         if exist "%LLVM_ROOT%\bin\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\bin\clang-cl.exe"
@@ -32,6 +33,7 @@ if "%OBJCOPY_BIN%"=="" (
 )
 if "%OBJCOPY_BIN%"=="" where llvm-objcopy.exe >nul 2>&1 && set "OBJCOPY_BIN=llvm-objcopy.exe"
 
+if "%LLVM_ROOT%"=="" if exist "C:\LLVM-22-dev\bin\clang-cl.exe" set "LLVM_ROOT=C:\LLVM-22-dev"
 if "%CLANG_BIN%"=="" (
     echo [-] ERROR: LLVM environment variable is not configured!
     exit /b 1
@@ -45,14 +47,14 @@ if "%PLUGIN_DLL%"=="" (
 set LTL_LIB=D:\MemLLVM\ltl\ltl.lib
 set LTL_INC=D:\MemLLVM\ltl\include
 
-set COMMON_FLAGS=/std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /clang:-ffreestanding /clang:-fno-builtin /clang:-mno-stack-arg-probe /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" -O2
-set LINK_FLAGS=/entry:main /subsystem:console /nodefaultlib /safeseh:no /merge:.rdata=.text /merge:.data=.text /merge:.bss=.text /opt:noicf
+set COMMON_FLAGS=/std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /clang:-ffreestanding /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" -O2
+set LINK_FLAGS=/entry:main /subsystem:console /nodefaultlib /safeseh:no /opt:noicf
 
 echo [*] Compiling and running Test 1: STL vector container...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_stl_basic.cpp /Fo:D:\MemLLVM\tests\test_cpp_stl_basic.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_stl_basic.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_stl_basic.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_stl_basic.bin D:\MemLLVM\tests\test_cpp_stl_basic.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_stl_basic.bin D:\MemLLVM\tests\test_cpp_stl_basic.exe
 
 echo [Test 1 Status: %ERRORLEVEL%]
 
@@ -61,7 +63,7 @@ echo [*] Compiling and running Test 2: Global Objects and Constructors...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_global_obj.cpp /Fo:D:\MemLLVM\tests\test_cpp_global_obj.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_global_obj.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_global_obj.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_global_obj.bin D:\MemLLVM\tests\test_cpp_global_obj.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_global_obj.bin D:\MemLLVM\tests\test_cpp_global_obj.exe
 
 echo [Test 2 Status: %ERRORLEVEL%]
 
@@ -70,7 +72,7 @@ echo [*] Compiling and running Test 3: Virtual Polymorphism and VTables...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_polymorphism.cpp /Fo:D:\MemLLVM\tests\test_cpp_polymorphism.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_polymorphism.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_polymorphism.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_polymorphism.bin D:\MemLLVM\tests\test_cpp_polymorphism.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_polymorphism.bin D:\MemLLVM\tests\test_cpp_polymorphism.exe
 
 echo [Test 3 Status: %ERRORLEVEL%]
 
@@ -79,7 +81,7 @@ echo [*] Compiling and running Test 4: Thread-Safe Function-Local Statics (Singl
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_thread_safe_static.cpp /Fo:D:\MemLLVM\tests\test_cpp_thread_safe_static.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread_safe_static.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread_safe_static.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_thread_safe_static.bin D:\MemLLVM\tests\test_cpp_thread_safe_static.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_thread_safe_static.bin D:\MemLLVM\tests\test_cpp_thread_safe_static.exe
 
 echo [Test 4 Status: %ERRORLEVEL%]
 
@@ -88,7 +90,7 @@ echo [*] Compiling and running Test 5: Pointer-bearing Struct Constants...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_struct_ptr_const.cpp /Fo:D:\MemLLVM\tests\test_cpp_struct_ptr_const.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_struct_ptr_const.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_struct_ptr_const.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_struct_ptr_const.bin D:\MemLLVM\tests\test_cpp_struct_ptr_const.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_struct_ptr_const.bin D:\MemLLVM\tests\test_cpp_struct_ptr_const.exe
 
 echo [Test 5 Status: %ERRORLEVEL%]
 
@@ -97,7 +99,7 @@ echo [*] Compiling and running Test 6: Initialized and Uninitialized Globals (.d
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_globals_data_bss.cpp /Fo:D:\MemLLVM\tests\test_cpp_globals_data_bss.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_globals_data_bss.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_globals_data_bss.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_globals_data_bss.bin D:\MemLLVM\tests\test_cpp_globals_data_bss.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_globals_data_bss.bin D:\MemLLVM\tests\test_cpp_globals_data_bss.exe
 
 echo [Test 6 Status: %ERRORLEVEL%]
 
@@ -106,7 +108,7 @@ echo [*] Compiling and running Test 7: std::mutex and std::lock_guard...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_mutex.cpp /Fo:D:\MemLLVM\tests\test_cpp_mutex.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_mutex.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_mutex.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_mutex.bin D:\MemLLVM\tests\test_cpp_mutex.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_mutex.bin D:\MemLLVM\tests\test_cpp_mutex.exe
 
 echo [Test 7 Status: %ERRORLEVEL%]
 
@@ -115,7 +117,7 @@ echo [*] Compiling and running Test 8: std::thread multi-threading...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_thread.cpp /Fo:D:\MemLLVM\tests\test_cpp_thread.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_thread.bin D:\MemLLVM\tests\test_cpp_thread.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_thread.bin D:\MemLLVM\tests\test_cpp_thread.exe
 
 echo [Test 8 Status: %ERRORLEVEL%]
 
@@ -124,7 +126,7 @@ echo [*] Compiling and running Test 9: thread_local native emulated TLS...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_thread_local.cpp /Fo:D:\MemLLVM\tests\test_cpp_thread_local.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread_local.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread_local.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_thread_local.bin D:\MemLLVM\tests\test_cpp_thread_local.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_thread_local.bin D:\MemLLVM\tests\test_cpp_thread_local.exe
 
 echo [Test 9 Status: %ERRORLEVEL%]
 
@@ -133,7 +135,7 @@ echo [*] Compiling and running Test 10: std::filesystem file operations...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_filesystem.cpp /Fo:D:\MemLLVM\tests\test_cpp_filesystem.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_filesystem.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_filesystem.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_filesystem.bin D:\MemLLVM\tests\test_cpp_filesystem.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_filesystem.bin D:\MemLLVM\tests\test_cpp_filesystem.exe
 
 echo [Test 10 Status: %ERRORLEVEL%]
 
@@ -142,7 +144,7 @@ echo [*] Compiling and running Test 11: std::cout and std::cerr streams...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_iostream.cpp /Fo:D:\MemLLVM\tests\test_cpp_iostream.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_iostream.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_iostream.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_iostream.bin D:\MemLLVM\tests\test_cpp_iostream.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_iostream.bin D:\MemLLVM\tests\test_cpp_iostream.exe
 
 echo [Test 11 Status: %ERRORLEVEL%]
 
@@ -151,7 +153,7 @@ echo [*] Compiling and running Test 12: std::fstream (ifstream, ofstream, std::l
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_fstream.cpp /Fo:D:\MemLLVM\tests\test_cpp_fstream.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_fstream.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_fstream.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_fstream.bin D:\MemLLVM\tests\test_cpp_fstream.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_fstream.bin D:\MemLLVM\tests\test_cpp_fstream.exe
 
 echo [Test 12 Status: %ERRORLEVEL%]
 
@@ -160,8 +162,7 @@ echo [*] Compiling and running Test 13: std::cin console stream input...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_cin.cpp /Fo:D:\MemLLVM\tests\test_cpp_cin.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_cin.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_cin.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_cin.bin D:\MemLLVM\tests\test_cpp_cin.exe
-echo World | "%RUNNER%" D:\MemLLVM\tests\test_cpp_cin.bin
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_cin.bin D:\MemLLVM\tests\test_cpp_cin.exe
 echo [Test 13 Status: %ERRORLEVEL%]
 
 echo.
@@ -169,7 +170,7 @@ echo [*] Compiling and running Test 14: std::regex and std::regex_search...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_regex.cpp /Fo:D:\MemLLVM\tests\test_cpp_regex.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_regex.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_regex.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_regex.bin D:\MemLLVM\tests\test_cpp_regex.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_regex.bin D:\MemLLVM\tests\test_cpp_regex.exe
 
 echo [Test 14 Status: %ERRORLEVEL%]
 
@@ -178,17 +179,17 @@ echo [*] Compiling and running Test 15: std::async, std::future, std::promise...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_async.cpp /Fo:D:\MemLLVM\tests\test_cpp_async.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_async.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_async.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_async.bin D:\MemLLVM\tests\test_cpp_async.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_async.bin D:\MemLLVM\tests\test_cpp_async.exe
 
 echo [Test 15 Status: %ERRORLEVEL%]
 
 echo.
 echo [*] Compiling and running Test 16: C++20 Standard Module (import std;)...
-set MODULE_FLAGS=/std:c++20 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang:-fno-builtin /clang:-mno-stack-arg-probe /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" "/clang:-fmodule-file=std=D:\MemLLVM\ltl\modules\std.pcm" -O2
+set MODULE_FLAGS=/std:c++20 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" "/clang:-fmodule-file=std=D:\MemLLVM\ltl\modules\std.pcm" -O2
 "%CLANG_BIN%" %MODULE_FLAGS% -c D:\MemLLVM\tests\test_cpp_module_std.cpp /Fo:D:\MemLLVM\tests\test_cpp_module_std.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_module_std.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_module_std.exe
-"%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_module_std.bin D:\MemLLVM\tests\test_cpp_module_std.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_module_std.bin D:\MemLLVM\tests\test_cpp_module_std.exe
 
 echo [Test 16 Status: %ERRORLEVEL%]
 

@@ -40,9 +40,12 @@ if "%LIB_BIN%"=="" (
 )
 
 if "%PLUGIN_DLL%"=="" (
-    if exist "%LTL_ROOT%\..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\build\MemLLVM\Release\MemLLVM.dll"
-    if exist "%LTL_ROOT%\..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\build\Release\MemLLVM.dll"
-    if exist "%LTL_ROOT%\..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\release_artifacts\MemLLVM.dll"
+    rem First match wins: without the "if not defined" guards every subsequent
+    rem hit overwrites the previous one, so a stale release_artifacts DLL would
+    rem silently shadow the freshly built plugin.
+    if not defined PLUGIN_DLL if exist "%LTL_ROOT%\..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\build\MemLLVM\Release\MemLLVM.dll"
+    if not defined PLUGIN_DLL if exist "%LTL_ROOT%\..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\build\Release\MemLLVM.dll"
+    if not defined PLUGIN_DLL if exist "%LTL_ROOT%\..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\release_artifacts\MemLLVM.dll"
 )
 
 echo [*] Compiling MemLLVM-LTL components...

@@ -69,21 +69,33 @@ jobs:
 
           # 1. bin & lib
           Copy-Item "release_artifacts/MemLLVM.dll" "$sdk/bin/" -Force
+          if (Test-Path "ltl/ltl.lib") {
+            Copy-Item "ltl/ltl.lib" "$sdk/lib/" -Force
+          }
           if (Test-Path "build/MemLLVM/Release/MemLLVM.lib") {
             Copy-Item "build/MemLLVM/Release/MemLLVM.lib" "$sdk/lib/" -Force
           }
 
           # 2. include
           Copy-Item "MemLLVM/*.h" "$sdk/include/" -Force
+          if (Test-Path "ltl/include") {
+            Copy-Item -Recurse "ltl/include/*" "$sdk/include/" -Force
+          }
 
           # 3. LTL runtime
           Copy-Item -Recurse "ltl/*" "$sdk/ltl/" -Force
 
-          # 4. Tools (SCLoader GUI runner)
+          # 4. Tools (SCLoader GUI runner and flat binary extractor)
           Copy-Item "Tools/SCLoader.exe" "$sdk/Tools/" -Force
+          if (Test-Path "Tools/extract_flat_bin.py") {
+            Copy-Item "Tools/extract_flat_bin.py" "$sdk/Tools/" -Force
+          }
 
           # 5. Full Source Code & Setup Scripts
           Copy-Item -Recurse "MemLLVM/*" "$sdk/src/" -Force
+          if (Test-Path "Resolver.c") {
+            Copy-Item "Resolver.c" "$sdk/src/" -Force
+          }
           Copy-Item "CMakeLists.txt" "$sdk/" -Force
           Copy-Item "readme.md" "$sdk/" -Force
           Copy-Item "setup_env.bat" "$sdk/" -Force

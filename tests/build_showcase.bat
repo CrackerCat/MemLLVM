@@ -38,9 +38,9 @@ if "%CLANG_BIN%"=="" (
 )
 
 if "%PLUGIN_DLL%"=="" (
-    if exist "..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=..\build\MemLLVM\Release\MemLLVM.dll"
-    if exist "..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=..\build\Release\MemLLVM.dll"
-    if exist "..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=..\release_artifacts\MemLLVM.dll"
+    if not defined PLUGIN_DLL if exist "..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=..\build\MemLLVM\Release\MemLLVM.dll"
+    if not defined PLUGIN_DLL if exist "..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=..\build\Release\MemLLVM.dll"
+    if not defined PLUGIN_DLL if exist "..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=..\release_artifacts\MemLLVM.dll"
 )
 
 echo [*] Compiling showcase.c with MemLLVM Pass Plugin + Freestanding flags...
@@ -48,7 +48,6 @@ echo [*] Compiling showcase.c with MemLLVM Pass Plugin + Freestanding flags...
     /GS- ^
     /clang:-ffreestanding ^
     /clang:-fno-builtin ^
-    /clang:-mno-stack-arg-probe ^
     /clang:-fno-jump-tables ^
     /clang:-fno-exceptions ^
     /clang:-fno-rtti ^

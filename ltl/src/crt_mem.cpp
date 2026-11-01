@@ -16,6 +16,26 @@ int __CxxFrameHandler3() {
     return 0;
 }
 
+// SEH personality routine for functions containing __try/__except.
+//
+// clang-cl lowers `__try` to a `personality ptr @__C_specific_handler` operand
+// on the enclosing function, so this symbol is referenced by the object file
+// even though nothing ever *calls* it from generated code. A flat binary has no
+// registered .pdata/UNWIND_INFO, so the OS will never dispatch through it
+// either; this definition exists so the link succeeds.
+//
+// Return value is an EXCEPTION_DISPOSITION. 1 == ExceptionContinueSearch is the
+// safe "I do not handle this" answer, which also means: a hardware fault inside
+// a __try block in a MemLLVM image is NOT caught by the __except clause.
+int __C_specific_handler(void* ExceptionRecord, void* EstablisherFrame,
+                         void* ContextRecord, void* DispatcherContext) {
+    (void)ExceptionRecord;
+    (void)EstablisherFrame;
+    (void)ContextRecord;
+    (void)DispatcherContext;
+    return 1; // ExceptionContinueSearch
+}
+
 [[noreturn]] void __cdecl __std_terminate() noexcept {
     ExitProcess(0xc0000025);
 }
@@ -53,6 +73,18 @@ void* memset(void* dest, int c, size_t count) {
         d[i] = static_cast<char>(c);
     }
     return dest;
+}
+
+// clang has a LibFunc builtin for memcmp, so without this pragma the loop body
+// gets optimised straight back into a recursive call to memcmp.
+#pragma function(memcmp)
+int memcmp(const void* s1, const void* s2, size_t n) {
+    const unsigned char* p1 = static_cast<const unsigned char*>(s1);
+    const unsigned char* p2 = static_cast<const unsigned char*>(s2);
+    for (size_t i = 0; i < n; ++i) {
+        if (p1[i] != p2[i]) return (int)p1[i] - (int)p2[i];
+    }
+    return 0;
 }
 
 float ceilf(float x) {
@@ -143,6 +175,29 @@ int wcsncmp(const wchar_t* s1, const wchar_t* s2, size_t n) {
     return 0;
 }
 
+#pragma function(wcschr)
+wchar_t* wcschr(const wchar_t* s, wchar_t c) {
+    if (!s) return nullptr;
+    while (*s) {
+        if (*s == c) return const_cast<wchar_t*>(s);
+        ++s;
+    }
+    return (c == 0) ? const_cast<wchar_t*>(s) : nullptr;
+}
+
+#pragma function(wcsstr)
+wchar_t* wcsstr(const wchar_t* haystack, const wchar_t* needle) {
+    if (!haystack || !needle) return nullptr;
+    if (!*needle) return const_cast<wchar_t*>(haystack);
+    for (; *haystack; ++haystack) {
+        const wchar_t* h = haystack;
+        const wchar_t* n = needle;
+        while (*h && *n && *h == *n) { ++h; ++n; }
+        if (!*n) return const_cast<wchar_t*>(haystack);
+    }
+    return nullptr;
+}
+
 int _wcsicmp(const wchar_t* s1, const wchar_t* s2) {
     while (*s1 && (towlower_ascii(*s1) == towlower_ascii(*s2))) {
         s1++;
@@ -227,7 +282,39 @@ void* bsearch(const void* key, const void* base, size_t num, size_t size, int (*
     return nullptr;
 }
 
-void __chkstk() {}
+// Windows x64 __chkstk & _alloca_probe
+// When stack frame allocation exceeds 4096 bytes, clang-cl passes allocation size
+// in RAX and invokes __chkstk. It probes downward page-by-page from StackLimit
+// (gs:[0x10]) to trip OS guard page allocation without skipping pages.
+// Preserves RAX, RCX, RDX, R8, R9, R10, R11 and restores caller RSP.
+__asm__(
+    ".intel_syntax noprefix\n"
+    ".globl __chkstk\n"
+    ".globl _alloca_probe\n"
+    "__chkstk:\n"
+    "_alloca_probe:\n"
+    "    sub rsp, 16\n"
+    "    mov [rsp], r10\n"
+    "    mov [rsp+8], r11\n"
+    "    xor r11, r11\n"
+    "    lea r10, [rsp+24]\n"
+    "    sub r10, rax\n"
+    "    cmovb r10, r11\n"
+    "    mov r11, qword ptr gs:[16]\n"
+    "    cmp r10, r11\n"
+    "    jae .Lcs20\n"
+    "    and r10w, 0xf000\n"
+    ".Lcs10:\n"
+    "    lea r11, [r11-4096]\n"
+    "    mov byte ptr [r11], 0\n"
+    "    cmp r10, r11\n"
+    "    jne .Lcs10\n"
+    ".Lcs20:\n"
+    "    mov r10, [rsp]\n"
+    "    mov r11, [rsp+8]\n"
+    "    add rsp, 16\n"
+    "    ret\n"
+);
 
 const void* __stdcall __std_find_trivial_2(const void* _First, const void* _Last, uint16_t _Val) noexcept {
     const uint16_t* p = static_cast<const uint16_t*>(_First);
@@ -331,6 +418,148 @@ unsigned long __stdcall GetActiveProcessorCount(unsigned short GroupNumber) noex
     return 1;
 }
 extern "C" void* const __imp_GetActiveProcessorCount = (void*)GetActiveProcessorCount;
+
+// ============================================================================
+// Lifecycle & Process Management (atexit, exit, _initterm, argv reconstruction)
+// ============================================================================
+
+void* __stdcall GetCommandLineW();
+wchar_t** __stdcall CommandLineToArgvW(const wchar_t* lpCmdLine, int* pNumArgs);
+void* __stdcall GetProcessHeap();
+void* __stdcall HeapAlloc(void* hHeap, unsigned int dwFlags, size_t dwBytes);
+int __stdcall WideCharToMultiByte(unsigned int CodePage, unsigned int dwFlags,
+                                  const wchar_t* lpWideCharStr, int cchWideChar,
+                                  char* lpMultiByteStr, int cbMultiByte,
+                                  const char* lpDefaultChar, int* lpUsedDefaultChar);
+
+typedef void (__cdecl *atexit_func_t)();
+typedef void (__cdecl *cxa_dtor_t)(void *);
+typedef void (__cdecl *_PVFV)(void);
+
+struct MemLLVMAtexitEntry {
+    cxa_dtor_t func;
+    void *arg;
+    bool is_cxa;
+};
+
+static constexpr size_t MEMLLVM_MAX_ATEXIT = 256;
+static MemLLVMAtexitEntry s_memllvm_atexit_table[MEMLLVM_MAX_ATEXIT];
+static size_t s_memllvm_atexit_count = 0;
+
+int atexit(void (__cdecl *func)()) {
+    if (!func) return -1;
+    if (s_memllvm_atexit_count >= MEMLLVM_MAX_ATEXIT) return -1;
+    s_memllvm_atexit_table[s_memllvm_atexit_count++] = { reinterpret_cast<cxa_dtor_t>(func), nullptr, false };
+    return 0;
+}
+
+int __cxa_atexit(void (__cdecl *func)(void *), void *arg, void *dso_handle) {
+    (void)dso_handle;
+    if (!func) return -1;
+    if (s_memllvm_atexit_count >= MEMLLVM_MAX_ATEXIT) return -1;
+    s_memllvm_atexit_table[s_memllvm_atexit_count++] = { func, arg, true };
+    return 0;
+}
+
+void _doexit() {
+    while (s_memllvm_atexit_count > 0) {
+        --s_memllvm_atexit_count;
+        auto entry = s_memllvm_atexit_table[s_memllvm_atexit_count];
+        if (entry.func) {
+            if (entry.is_cxa) {
+                entry.func(entry.arg);
+            } else {
+                reinterpret_cast<atexit_func_t>(entry.func)();
+            }
+        }
+    }
+}
+
+void exit(int status) {
+    _doexit();
+    ExitProcess(static_cast<unsigned int>(status));
+}
+
+void _exit(int status) {
+    ExitProcess(static_cast<unsigned int>(status));
+}
+
+void _initterm(_PVFV *pfbegin, _PVFV *pfend) {
+    while (pfbegin < pfend) {
+        if (*pfbegin) {
+            (**pfbegin)();
+        }
+        ++pfbegin;
+    }
+}
+
+int _initterm_e(_PVFV *pfbegin, _PVFV *pfend) {
+    while (pfbegin < pfend) {
+        if (*pfbegin) {
+            (**pfbegin)();
+        }
+        ++pfbegin;
+    }
+    return 0;
+}
+
+void __memllvm_get_ansi_argv(int *out_argc, char ***out_argv) {
+    int numArgs = 0;
+    const wchar_t *cmdLine = static_cast<const wchar_t *>(GetCommandLineW());
+    wchar_t **argvW = cmdLine ? CommandLineToArgvW(cmdLine, &numArgs) : nullptr;
+    if (!argvW || numArgs <= 1) {
+        static char fallback_bin[] = "app.bin";
+        static char *fallback_argv[] = { fallback_bin, nullptr };
+        if (out_argc) *out_argc = 1;
+        if (out_argv) *out_argv = fallback_argv;
+        return;
+    }
+
+    int eff_argc = numArgs - 1;
+    void *heap = GetProcessHeap();
+    char **argvA = static_cast<char **>(HeapAlloc(heap, 8 /* HEAP_ZERO_MEMORY */, (eff_argc + 1) * sizeof(char *)));
+    if (!argvA) {
+        static char fallback_bin[] = "app.bin";
+        static char *fallback_argv[] = { fallback_bin, nullptr };
+        if (out_argc) *out_argc = 1;
+        if (out_argv) *out_argv = fallback_argv;
+        return;
+    }
+
+    for (int i = 0; i < eff_argc; ++i) {
+        const wchar_t *wstr = argvW[i + 1];
+        int len = WideCharToMultiByte(0 /* CP_ACP */, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
+        if (len > 0) {
+            char *buf = static_cast<char *>(HeapAlloc(heap, 0, len));
+            if (buf) {
+                WideCharToMultiByte(0, 0, wstr, -1, buf, len, nullptr, nullptr);
+                argvA[i] = buf;
+            } else {
+                argvA[i] = const_cast<char *>("");
+            }
+        } else {
+            argvA[i] = const_cast<char *>("");
+        }
+    }
+    argvA[eff_argc] = nullptr;
+    if (out_argc) *out_argc = eff_argc;
+    if (out_argv) *out_argv = argvA;
+}
+
+void __memllvm_get_wide_argv(int *out_argc, wchar_t ***out_argv) {
+    int numArgs = 0;
+    const wchar_t *cmdLine = static_cast<const wchar_t *>(GetCommandLineW());
+    wchar_t **argvW = cmdLine ? CommandLineToArgvW(cmdLine, &numArgs) : nullptr;
+    if (!argvW || numArgs <= 1) {
+        static wchar_t fallback_bin[] = L"app.bin";
+        static wchar_t *fallback_argv[] = { fallback_bin, nullptr };
+        if (out_argc) *out_argc = 1;
+        if (out_argv) *out_argv = fallback_argv;
+        return;
+    }
+    if (out_argc) *out_argc = numArgs - 1;
+    if (out_argv) *out_argv = &argvW[1];
+}
 
 } // extern "C"
 

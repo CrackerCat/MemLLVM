@@ -43,19 +43,18 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
         }
       }
 
-      if (!Ctors.empty() && EntryFn && !EntryFn->empty()) {
-        std::stable_sort(Ctors.begin(), Ctors.end(), [](const CtorEntry &a, const CtorEntry &b) {
-          return a.priority < b.priority;
-        });
+      std::stable_sort(Ctors.begin(), Ctors.end(), [](const CtorEntry &a, const CtorEntry &b) {
+        return a.priority < b.priority;
+      });
 
+      if (EntryFn && !EntryFn->empty()) {
+        // Fixed anchor at start of entry function, after companion resource loader preamble
         Instruction *InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
         for (Instruction &I : EntryFn->getEntryBlock()) {
           if (auto *CI = dyn_cast<CallInst>(&I)) {
-            if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "LoadLibraryA") {
+            if (getDirectCallee(*CI) && getDirectCallee(*CI)->getName() == "LoadLibraryA") {
               InsertBefore = I.getNextNode();
             }
-          } else if (isa<StoreInst>(&I)) {
-            InsertBefore = I.getNextNode();
           }
         }
 
@@ -65,12 +64,23 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
                  << item.func->getName() << " (Priority: " << item.priority << ")\n";
           Builder.CreateCall(item.func, {});
         }
+        CtorsVar->eraseFromParent();
+        errs() << "[MemLLVM] GlobalLifecyclePass: Erased @llvm.global_ctors to eliminate .CRT$XCU section in entry TU.\n";
+        Changed = true;
+      } else {
+        // Non-entry TU: dispatch constructors via per-TU init function in .mli section
+        Function *TuInit = getOrCreateTuInit(M);
+        Instruction *InsertBefore = TuInit->getEntryBlock().getTerminator();
+        IRBuilder<> Builder(InsertBefore);
+        for (const auto &item : Ctors) {
+          errs() << "[MemLLVM] GlobalLifecyclePass: Appending call to global constructor @" 
+                 << item.func->getName() << " (Priority: " << item.priority << ") into TU init\n";
+          Builder.CreateCall(item.func, {});
+        }
+        registerTuInit(M, TuInit);
+        CtorsVar->eraseFromParent();
         Changed = true;
       }
-
-      CtorsVar->eraseFromParent();
-      errs() << "[MemLLVM] GlobalLifecyclePass: Erased @llvm.global_ctors to eliminate .CRT$XCU section.\n";
-      Changed = true;
     }
   }
 
@@ -85,7 +95,7 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
       Instruction *InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
       for (Instruction &I : EntryFn->getEntryBlock()) {
         if (auto *CI = dyn_cast<CallInst>(&I)) {
-          if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "LoadLibraryA") {
+          if (getDirectCallee(*CI) && getDirectCallee(*CI)->getName() == "LoadLibraryA") {
             InsertBefore = I.getNextNode();
           }
         }
@@ -97,52 +107,8 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
     }
   }
 
-  // 2. Intercept and lower global destructors registered via atexit / __cxa_atexit
-  struct DtorCall {
-    Value *Fn;
-    Value *Arg;
-  };
-  SmallVector<DtorCall, 8> Dtors;
-  SmallVector<CallInst *, 8> AtexitCalls;
-
-  for (Function &F : M) {
-    if (F.isDeclaration()) continue;
-    for (BasicBlock &BB : F) {
-      for (Instruction &I : BB) {
-        if (auto *CI = dyn_cast<CallInst>(&I)) {
-          Function *Callee = CI->getCalledFunction();
-          if (Callee) {
-            if (Callee->getName() == "atexit" && CI->arg_size() >= 1) {
-              Value *FnArg = CI->getArgOperand(0);
-              if (isa<Constant>(FnArg)) {
-                Dtors.push_back({FnArg, nullptr});
-                AtexitCalls.push_back(CI);
-              }
-            } else if (Callee->getName() == "__cxa_atexit" && CI->arg_size() >= 2) {
-              Value *FnArg = CI->getArgOperand(0);
-              Value *ObjArg = CI->getArgOperand(1);
-              // Only lower across functions if both function and object pointer are constants (e.g. global objects)
-              if (isa<Constant>(FnArg) && isa<Constant>(ObjArg)) {
-                Dtors.push_back({FnArg, ObjArg});
-                AtexitCalls.push_back(CI);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  for (CallInst *CI : AtexitCalls) {
-    CI->replaceAllUsesWith(ConstantInt::get(CI->getType(), 0));
-    CI->eraseFromParent();
-    Changed = true;
-  }
-
-  // Execute destructors in reverse LIFO order before EntryFn returns
-  std::reverse(Dtors.begin(), Dtors.end());
-
-  if (!Dtors.empty() && EntryFn && !EntryFn->empty()) {
+  // 2. Ensure _doexit() is invoked before entry function returns
+  if (EntryFn && !EntryFn->empty()) {
     SmallVector<ReturnInst *, 4> RetInsts;
     for (BasicBlock &BB : *EntryFn) {
       if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
@@ -150,25 +116,17 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
       }
     }
 
-    Type *PtrTy = PointerType::get(M.getContext(), 0);
-    FunctionType *FT0 = FunctionType::get(Type::getVoidTy(M.getContext()), false);
-    FunctionType *FT1 = FunctionType::get(Type::getVoidTy(M.getContext()), {PtrTy}, false);
-
-    for (ReturnInst *RI : RetInsts) {
-      IRBuilder<> Builder(RI);
-      for (const auto &d : Dtors) {
-        if (d.Arg) {
-          Builder.CreateCall(FT1, d.Fn, {d.Arg});
-        } else {
-          Builder.CreateCall(FT0, d.Fn, {});
-        }
+    if (!RetInsts.empty()) {
+      FunctionCallee DoExitFn = M.getOrInsertFunction("_doexit",
+          FunctionType::get(Type::getVoidTy(M.getContext()), false));
+      for (ReturnInst *RI : RetInsts) {
+        IRBuilder<> Builder(RI);
+        Builder.CreateCall(DoExitFn);
         Changed = true;
       }
+      errs() << "[MemLLVM] GlobalLifecyclePass: Inserted _doexit() call before "
+             << RetInsts.size() << " return point(s) in @" << EntryFn->getName() << "\n";
     }
-
-    errs() << "[MemLLVM] GlobalLifecyclePass: Inserted " << Dtors.size() 
-           << " reverse LIFO destructor calls before " << RetInsts.size() 
-           << " return point(s) in @" << EntryFn->getName() << "\n";
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();

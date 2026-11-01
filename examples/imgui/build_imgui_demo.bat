@@ -42,16 +42,16 @@ if "%LLD_BIN%"=="" (
 )
 
 if "%PLUGIN_DLL%"=="" (
-    if exist "..\..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=..\..\build\MemLLVM\Release\MemLLVM.dll"
-    if exist "..\..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=..\..\build\Release\MemLLVM.dll"
-    if exist "..\..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=..\..\release_artifacts\MemLLVM.dll"
+    if not defined PLUGIN_DLL if exist "..\..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=..\..\build\MemLLVM\Release\MemLLVM.dll"
+    if not defined PLUGIN_DLL if exist "..\..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=..\..\build\Release\MemLLVM.dll"
+    if not defined PLUGIN_DLL if exist "..\..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=..\..\release_artifacts\MemLLVM.dll"
 )
 
 set LTL_LIB=..\..\ltl\ltl.lib
 set LTL_INC=..\..\ltl\include
 
 echo [*] Compiling Dear ImGui Unity codebase with MemLLVM Plugin...
-"%CLANG_BIN%" /std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang:-fno-builtin /clang:-mno-stack-arg-probe /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" -I. -Ibackends -Iexamples\example_win32_directx11 -O2 -c imgui_unity.cpp /Fo:imgui_unity.obj
+"%CLANG_BIN%" /std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" -I. -Ibackends -Iexamples\example_win32_directx11 -O2 -c imgui_unity.cpp /Fo:imgui_unity.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 
 echo [*] Linking Dear ImGui with lld-link and ltl.lib...

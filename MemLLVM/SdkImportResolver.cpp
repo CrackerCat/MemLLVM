@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -33,6 +35,9 @@ struct SdkApiEntry {
 class SdkImportResolver {
 private:
   bool Initialized = false;
+  // Scanning every import library is expensive, and the result does not depend
+  // on the name being looked up, so it is done at most once per process.
+  bool LocalLibsScanned = false;
   std::vector<std::string> DllNames;
   std::vector<SdkApiEntry> Entries;
   std::unordered_map<std::string, std::string> DynamicCache;
@@ -62,43 +67,125 @@ private:
     return true;
   }
 
+  // Parse a single COFF import library and cache every (symbol -> dll) pair it
+  // declares. Shared by every directory searched below.
+  //
+  // The scan walks the raw bytes looking for IMPORT_OBJECT_HEADER signatures
+  // rather than parsing the archive properly, so every read has to be bounded
+  // by the buffer end. The previous version required 32 spare bytes past the
+  // header, which silently dropped the *last* import object of a short library:
+  // msasn1.min.lib ends with ASN1_FreeEncoded at offset 3536 of 3584, leaving
+  // only 48 bytes and putting it outside the loop bound. That one symbol was
+  // then never resolvable, and mimikatz kept importing it.
+  void scanOneLib(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f)
+      return;
+    fseek(f, 0, SEEK_END);
+    long rawSize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (rawSize <= 0 || rawSize >= 100 * 1024 * 1024) {
+      fclose(f);
+      return;
+    }
+
+    std::vector<uint8_t> buf((size_t)rawSize);
+    bool ok = fread(buf.data(), 1, (size_t)rawSize, f) == (size_t)rawSize;
+    fclose(f);
+    if (!ok)
+      return;
+
+    const char *base = (const char*)buf.data();
+    const char *end = base + buf.size();
+
+    for (size_t i = 0; i + sizeof(IMPORT_OBJECT_HEADER) < buf.size(); i++) {
+      auto *hdr = (const IMPORT_OBJECT_HEADER*)(base + i);
+      if (hdr->Sig1 != 0 || hdr->Sig2 != 0xFFFF)
+        continue;
+      if (hdr->Machine != 0x8664 && hdr->Machine != 0)
+        continue;
+
+      const char *sym = base + i + sizeof(IMPORT_OBJECT_HEADER);
+      if (sym >= end)
+        continue;
+      size_t symLen = strnlen(sym, std::min<size_t>((size_t)(end - sym), 128));
+      if (symLen == 0 || symLen >= (size_t)(end - sym))
+        continue;
+
+      const char *dll = sym + symLen + 1;
+      if (dll >= end)
+        continue;
+      size_t dllLen = strnlen(dll, std::min<size_t>((size_t)(end - dll), 64));
+      if (dllLen == 0 || dllLen >= (size_t)(end - dll))
+        continue;
+
+      std::string lowerDll(dll, dllLen);
+      for (char &c : lowerDll) c = (char)tolower((unsigned char)c);
+      if (lowerDll.find(".dll") == std::string::npos &&
+          lowerDll.find(".drv") == std::string::npos)
+        continue;
+
+      DynamicCache[std::string(sym, symLen)] = lowerDll;
+    }
+  }
+
+  // Undocumented exports (ASN1_*, I_NetServer*, RtlGetCurrentPeb ...) are not in
+  // the Windows SDK index, so the only place their owning DLL is recorded is the
+  // project's own import libraries. mimikatz keeps those in lib\x64, not in the
+  // directory the compiler runs from, so the search has to cover a few likely
+  // locations — plus MEMLLVM_LIBPATH for anything unusual.
   void scanLocalLibsForApi(StringRef ApiName) {
 #ifdef _WIN32
-    WIN32_FIND_DATAA fd;
-    HANDLE hFind = FindFirstFileA("*.lib", &fd);
-    if (hFind == INVALID_HANDLE_VALUE) return;
+    if (LocalLibsScanned)
+      return;
+    LocalLibsScanned = true;
 
-    do {
-      FILE *f = fopen(fd.cFileName, "rb");
-      if (!f) continue;
-      fseek(f, 0, SEEK_END);
-      size_t sz = ftell(f);
-      fseek(f, 0, SEEK_SET);
-      if (sz > 0 && sz < 100 * 1024 * 1024) {
-        std::vector<uint8_t> buf(sz);
-        if (fread(buf.data(), 1, sz, f) == sz) {
-          for (size_t i = 0; i + sizeof(IMPORT_OBJECT_HEADER) + 32 < sz; i++) {
-            auto *hdr = (const IMPORT_OBJECT_HEADER*)(buf.data() + i);
-            if (hdr->Sig1 == 0 && hdr->Sig2 == 0xFFFF && (hdr->Machine == 0x8664 || hdr->Machine == 0)) {
-              const char *sym = (const char*)(buf.data() + i + sizeof(IMPORT_OBJECT_HEADER));
-              size_t symLen = strlen(sym);
-              if (symLen > 0 && symLen < 128) {
-                const char *dll = sym + symLen + 1;
-                if ((const uint8_t*)dll + strlen(dll) < buf.data() + sz && strlen(dll) > 0 && strlen(dll) < 64) {
-                  if (strstr(dll, ".dll") || strstr(dll, ".DLL") || strstr(dll, ".drv") || strstr(dll, ".DRV")) {
-                    std::string lowerDll = dll;
-                    for (char &c : lowerDll) c = tolower(c);
-                    DynamicCache[sym] = lowerDll;
-                  }
-                }
-              }
-            }
+    static const char *Dirs[] = {
+        "",            // cwd (original behaviour)
+        "lib\\",
+        "lib\\x64\\",
+        "..\\lib\\x64\\",
+        "..\\..\\lib\\x64\\",
+    };
+
+    for (const char *Dir : Dirs) {
+      std::string Pattern = std::string(Dir) + "*.lib";
+      WIN32_FIND_DATAA fd;
+      HANDLE hFind = FindFirstFileA(Pattern.c_str(), &fd);
+      if (hFind == INVALID_HANDLE_VALUE)
+        continue;
+      do {
+        std::string Full = std::string(Dir) + fd.cFileName;
+        scanOneLib(Full.c_str());
+      } while (FindNextFileA(hFind, &fd));
+      FindClose(hFind);
+    }
+
+    // Explicit override: semicolon-separated list of additional directories.
+    if (const char *Env = getenv("MEMLLVM_LIBPATH")) {
+      std::string All(Env);
+      size_t Start = 0;
+      while (Start <= All.size()) {
+        size_t Sep = All.find(';', Start);
+        if (Sep == std::string::npos) Sep = All.size();
+        std::string Dir = All.substr(Start, Sep - Start);
+        if (!Dir.empty()) {
+          if (Dir.back() != '\\' && Dir.back() != '/') Dir += '\\';
+          std::string Pattern = Dir + "*.lib";
+          WIN32_FIND_DATAA fd;
+          HANDLE hFind = FindFirstFileA(Pattern.c_str(), &fd);
+          if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+              std::string Full = Dir + fd.cFileName;
+              scanOneLib(Full.c_str());
+            } while (FindNextFileA(hFind, &fd));
+            FindClose(hFind);
           }
         }
+        if (Sep == All.size()) break;
+        Start = Sep + 1;
       }
-      fclose(f);
-    } while (FindNextFileA(hFind, &fd));
-    FindClose(hFind);
+    }
 #endif
   }
 

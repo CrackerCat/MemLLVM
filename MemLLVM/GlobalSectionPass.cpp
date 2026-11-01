@@ -19,15 +19,6 @@ PreservedAnalyses GlobalSectionPass::run(Module &M, ModuleAnalysisManager &MAM) 
     if (GV.getName().starts_with("llvm."))
       continue;
 
-    // Convert COMMON linkage to internal with explicit zero initializer
-    if (GV.getLinkage() == GlobalValue::CommonLinkage) {
-      GV.setLinkage(GlobalValue::InternalLinkage);
-      if (!GV.hasInitializer()) {
-        GV.setInitializer(Constant::getNullValue(GV.getValueType()));
-      }
-      Changed = true;
-    }
-
     // Ensure globals do not have split .text$* section names that confuse LLD section merging
     if (GV.hasSection() && GV.getSection().starts_with(".text")) {
       GV.setSection("");

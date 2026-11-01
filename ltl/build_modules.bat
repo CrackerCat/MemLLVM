@@ -49,7 +49,7 @@ echo [*] Found std.ixx at: %STD_IXX%
 echo [*] Precompiling C++20 Standard Module interface to: %OUT_DIR%\std.pcm ...
 
 "%CLANGPP%" -std=c++20 -fms-compatibility -fms-extensions -fno-exceptions -fno-rtti -D_HAS_EXCEPTIONS=0 ^
-  -fno-builtin -mno-stack-arg-probe -fno-jump-tables -O2 ^
+  -fno-builtin -fno-jump-tables -O2 ^
   -Wno-reserved-module-identifier -Wno-include-angled-in-module-purview ^
   -x c++-module --precompile "%STD_IXX%" -o "%OUT_DIR%\std.pcm"
 
