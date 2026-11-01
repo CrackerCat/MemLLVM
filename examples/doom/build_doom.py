@@ -11,19 +11,55 @@ import shutil
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 
-CLANG_CL = os.environ.get("CLANG_CL", r"C:\LLVM-22-dev\bin\clang-cl.exe")
-if not os.path.exists(CLANG_CL):
-    CLANG_CL = "clang-cl"
+def resolve_llvm_tool(tool_name):
+    env_direct = os.environ.get(tool_name.upper().replace("-", "_"))
+    if env_direct:
+        if os.path.exists(env_direct):
+            return env_direct
+        w = shutil.which(env_direct)
+        if w:
+            return w
 
-LLD_LINK = os.environ.get("LLD_LINK", r"C:\LLVM-22-dev\bin\lld-link.exe")
-if not os.path.exists(LLD_LINK):
-    LLD_LINK = "lld-link"
+    for var in ["LLVM_PATH", "LLVM_DIR", "LLVM_ROOT"]:
+        base = os.environ.get(var)
+        if base and os.path.exists(base):
+            cand = os.path.join(base, "bin", f"{tool_name}.exe")
+            if os.path.exists(cand):
+                return cand
+            cand = os.path.join(base, f"{tool_name}.exe")
+            if os.path.exists(cand):
+                return cand
 
-PLUGIN_DLL = os.environ.get("PLUGIN_DLL", os.path.join(REPO_ROOT, "build", "MemLLVM", "Release", "MemLLVM.dll"))
-if not os.path.exists(PLUGIN_DLL):
-    alt_plugin = os.path.join(REPO_ROOT, "build", "Release", "MemLLVM.dll")
-    if os.path.exists(alt_plugin):
-        PLUGIN_DLL = alt_plugin
+    w = shutil.which(tool_name) or shutil.which(f"{tool_name}.exe")
+    if w:
+        return w
+
+    print("=" * 72, file=sys.stderr)
+    print(f"[-] ERROR: Required LLVM tool '{tool_name}' could not be located!", file=sys.stderr)
+    print("[-] You MUST configure the LLVM environment variable before building:", file=sys.stderr)
+    print("[-]   CMD:        set LLVM_PATH=C:\\path\\to\\llvm", file=sys.stderr)
+    print("[-]   PowerShell: $env:LLVM_PATH = \"C:\\path\\to\\llvm\"", file=sys.stderr)
+    print("[-]   Permanent:  setx LLVM_PATH \"C:\\path\\to\\llvm\"", file=sys.stderr)
+    print("=" * 72, file=sys.stderr)
+    sys.exit(1)
+
+CLANG_CL = resolve_llvm_tool("clang-cl")
+LLD_LINK = resolve_llvm_tool("lld-link")
+
+PLUGIN_DLL = os.environ.get("PLUGIN_DLL")
+if not PLUGIN_DLL or not os.path.exists(PLUGIN_DLL):
+    for cand in [
+        os.path.join(REPO_ROOT, "build", "MemLLVM", "Release", "MemLLVM.dll"),
+        os.path.join(REPO_ROOT, "build", "Release", "MemLLVM.dll"),
+        os.path.join(REPO_ROOT, "release_artifacts", "MemLLVM.dll")
+    ]:
+        if os.path.exists(cand):
+            PLUGIN_DLL = cand
+            break
+
+if not PLUGIN_DLL or not os.path.exists(PLUGIN_DLL):
+    print(f"[-] ERROR: MemLLVM plugin DLL not found! Please build MemLLVM first or set PLUGIN_DLL.", file=sys.stderr)
+    sys.exit(1)
 
 LTL_LIB = os.path.join(REPO_ROOT, "ltl", "ltl.lib")
 LTL_INC = os.path.join(REPO_ROOT, "ltl", "include")

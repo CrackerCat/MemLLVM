@@ -7,14 +7,45 @@ echo =======================================================================
 echo   MemLLVM Flat Machine Code Builder: Native Win32 Scintilla Editor
 echo =======================================================================
 
-if "%CLANG_BIN%"=="" set CLANG_BIN=C:\LLVM-22-dev\bin\clang-cl.exe
-if not exist "%CLANG_BIN%" set CLANG_BIN=clang-cl.exe
+if not "%LLVM_PATH%"=="" set "LLVM_ROOT=%LLVM_PATH%"
+if "%LLVM_ROOT%"=="" if not "%LLVM_DIR%"=="" set "LLVM_ROOT=%LLVM_DIR%"
+if "%LLVM_ROOT%"=="" if not "%LLVM_HOME%"=="" set "LLVM_ROOT=%LLVM_HOME%"
 
-if "%LLD_BIN%"=="" set LLD_BIN=C:\LLVM-22-dev\bin\lld-link.exe
-if not exist "%LLD_BIN%" set LLD_BIN=lld-link.exe
+if "%CLANG_BIN%"=="" (
+    if not "%LLVM_ROOT%"=="" (
+        if exist "%LLVM_ROOT%\bin\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\bin\clang-cl.exe"
+        if exist "%LLVM_ROOT%\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\clang-cl.exe"
+    )
+)
+if "%CLANG_BIN%"=="" where clang-cl.exe >nul 2>&1 && set "CLANG_BIN=clang-cl.exe"
 
-if "%PLUGIN_DLL%"=="" set PLUGIN_DLL=..\..\build\MemLLVM\Release\MemLLVM.dll
-if not exist "%PLUGIN_DLL%" set PLUGIN_DLL=..\..\build\Release\MemLLVM.dll
+if "%LLD_BIN%"=="" (
+    if not "%LLVM_ROOT%"=="" (
+        if exist "%LLVM_ROOT%\bin\lld-link.exe" set "LLD_BIN=%LLVM_ROOT%\bin\lld-link.exe"
+        if exist "%LLVM_ROOT%\lld-link.exe" set "LLD_BIN=%LLVM_ROOT%\lld-link.exe"
+    )
+)
+if "%LLD_BIN%"=="" where lld-link.exe >nul 2>&1 && set "LLD_BIN=lld-link.exe"
+
+if "%CLANG_BIN%"=="" (
+    echo =======================================================================
+    echo [-] ERROR: LLVM environment variable is not configured!
+    echo [-] You must set LLVM_PATH or LLVM_DIR pointing to your LLVM installation.
+    echo [-] Example: set LLVM_PATH=C:\path\to\llvm
+    echo =======================================================================
+    exit /b 1
+)
+
+if "%LLD_BIN%"=="" (
+    echo [-] ERROR: lld-link not found! Please check your LLVM installation.
+    exit /b 1
+)
+
+if "%PLUGIN_DLL%"=="" (
+    if exist "..\..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=..\..\build\MemLLVM\Release\MemLLVM.dll"
+    if exist "..\..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=..\..\build\Release\MemLLVM.dll"
+    if exist "..\..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=..\..\release_artifacts\MemLLVM.dll"
+)
 
 set LTL_LIB=..\..\ltl\ltl.lib
 set LTL_INC=..\..\ltl\include

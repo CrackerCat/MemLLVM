@@ -11,18 +11,30 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (NOT DEFINED LLVM_DIR)
-  if (DEFINED ENV{LLVM_DIR})
+  if (DEFINED ENV{LLVM_DIR} AND NOT "$ENV{LLVM_DIR}" STREQUAL "")
     set(LLVM_DIR "$ENV{LLVM_DIR}" CACHE PATH "Path to LLVM cmake directory")
-  elseif (EXISTS "C:/LLVM-22-dev/lib/cmake/llvm")
-    set(LLVM_DIR "C:/LLVM-22-dev/lib/cmake/llvm" CACHE PATH "Path to LLVM cmake directory")
+  elseif (DEFINED ENV{LLVM_PATH} AND NOT "$ENV{LLVM_PATH}" STREQUAL "")
+    if (EXISTS "$ENV{LLVM_PATH}/lib/cmake/llvm")
+      set(LLVM_DIR "$ENV{LLVM_PATH}/lib/cmake/llvm" CACHE PATH "Path to LLVM cmake directory")
+    else()
+      set(LLVM_DIR "$ENV{LLVM_PATH}" CACHE PATH "Path to LLVM cmake directory")
+    endif()
   endif()
 endif()
 
-if (DEFINED LLVM_DIR)
-  find_package(LLVM REQUIRED CONFIG PATHS "${LLVM_DIR}" NO_DEFAULT_PATH)
-else()
-  find_package(LLVM REQUIRED CONFIG)
+if (NOT DEFINED LLVM_DIR)
+  message(FATAL_ERROR
+    "\n=======================================================================\n"
+    "[-] ERROR: LLVM environment variable is not configured!\n"
+    "[-] You MUST set LLVM_PATH or LLVM_DIR before configuring MemLLVM:\n"
+    "[-]   Windows CMD: set LLVM_PATH=C:\\path\\to\\llvm\n"
+    "[-]   PowerShell : $env:LLVM_PATH=\"C:\\path\\to\\llvm\"\n"
+    "[-]   Permanent  : setx LLVM_PATH \"C:\\path\\to\\llvm\"\n"
+    "=======================================================================\n"
+  )
 endif()
+
+find_package(LLVM REQUIRED CONFIG PATHS "${LLVM_DIR}" NO_DEFAULT_PATH)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")

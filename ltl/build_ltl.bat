@@ -5,14 +5,45 @@ cd /d "%~dp0"
 set LTL_ROOT=%~dp0
 if "%LTL_ROOT:~-1%"=="\" set LTL_ROOT=%LTL_ROOT:~0,-1%
 
-if "%CLANG_BIN%"=="" set CLANG_BIN=C:\LLVM-22-dev\bin\clang-cl.exe
-if not exist "%CLANG_BIN%" set CLANG_BIN=clang-cl.exe
+if not "%LLVM_PATH%"=="" set "LLVM_ROOT=%LLVM_PATH%"
+if "%LLVM_ROOT%"=="" if not "%LLVM_DIR%"=="" set "LLVM_ROOT=%LLVM_DIR%"
+if "%LLVM_ROOT%"=="" if not "%LLVM_HOME%"=="" set "LLVM_ROOT=%LLVM_HOME%"
 
-if "%LIB_BIN%"=="" set LIB_BIN=C:\LLVM-22-dev\bin\llvm-lib.exe
-if not exist "%LIB_BIN%" set LIB_BIN=llvm-lib.exe
+if "%CLANG_BIN%"=="" (
+    if not "%LLVM_ROOT%"=="" (
+        if exist "%LLVM_ROOT%\bin\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\bin\clang-cl.exe"
+        if exist "%LLVM_ROOT%\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\clang-cl.exe"
+    )
+)
+if "%CLANG_BIN%"=="" where clang-cl.exe >nul 2>&1 && set "CLANG_BIN=clang-cl.exe"
 
-if "%PLUGIN_DLL%"=="" set PLUGIN_DLL=%LTL_ROOT%\..\build\MemLLVM\Release\MemLLVM.dll
-if not exist "%PLUGIN_DLL%" set PLUGIN_DLL=%LTL_ROOT%\..\build\Release\MemLLVM.dll
+if "%LIB_BIN%"=="" (
+    if not "%LLVM_ROOT%"=="" (
+        if exist "%LLVM_ROOT%\bin\llvm-lib.exe" set "LIB_BIN=%LLVM_ROOT%\bin\llvm-lib.exe"
+        if exist "%LLVM_ROOT%\llvm-lib.exe" set "LIB_BIN=%LLVM_ROOT%\llvm-lib.exe"
+    )
+)
+if "%LIB_BIN%"=="" where llvm-lib.exe >nul 2>&1 && set "LIB_BIN=llvm-lib.exe"
+
+if "%CLANG_BIN%"=="" (
+    echo =======================================================================
+    echo [-] ERROR: LLVM environment variable is not configured!
+    echo [-] You must set LLVM_PATH or LLVM_DIR pointing to your LLVM installation.
+    echo [-] Example: set LLVM_PATH=C:\path\to\llvm
+    echo =======================================================================
+    exit /b 1
+)
+
+if "%LIB_BIN%"=="" (
+    echo [-] ERROR: llvm-lib not found! Please check your LLVM installation.
+    exit /b 1
+)
+
+if "%PLUGIN_DLL%"=="" (
+    if exist "%LTL_ROOT%\..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\build\MemLLVM\Release\MemLLVM.dll"
+    if exist "%LTL_ROOT%\..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\build\Release\MemLLVM.dll"
+    if exist "%LTL_ROOT%\..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=%LTL_ROOT%\..\release_artifacts\MemLLVM.dll"
+)
 
 echo [*] Compiling MemLLVM-LTL components...
 

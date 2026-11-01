@@ -4,10 +4,44 @@ echo =======================================================================
 echo   MemLLVM Flat Binary Generator: C Source -^> Pure Machine Code (.bin)
 echo =======================================================================
 
-set CLANG_BIN=C:\LLVM-22-dev\bin\clang-cl.exe
-set LLD_BIN=C:\LLVM-22-dev\bin\lld-link.exe
-set OBJCOPY_BIN=C:\LLVM-22-dev\bin\llvm-objcopy.exe
-set PLUGIN_DLL=D:\MemLLVM\build\MemLLVM\Release\MemLLVM.dll
+if not "%LLVM_PATH%"=="" set "LLVM_ROOT=%LLVM_PATH%"
+if "%LLVM_ROOT%"=="" if not "%LLVM_DIR%"=="" set "LLVM_ROOT=%LLVM_DIR%"
+if "%LLVM_ROOT%"=="" if not "%LLVM_HOME%"=="" set "LLVM_ROOT=%LLVM_HOME%"
+
+if "%CLANG_BIN%"=="" (
+    if not "%LLVM_ROOT%"=="" (
+        if exist "%LLVM_ROOT%\bin\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\bin\clang-cl.exe"
+        if exist "%LLVM_ROOT%\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\clang-cl.exe"
+    )
+)
+if "%CLANG_BIN%"=="" where clang-cl.exe >nul 2>&1 && set "CLANG_BIN=clang-cl.exe"
+
+if "%LLD_BIN%"=="" (
+    if not "%LLVM_ROOT%"=="" (
+        if exist "%LLVM_ROOT%\bin\lld-link.exe" set "LLD_BIN=%LLVM_ROOT%\bin\lld-link.exe"
+        if exist "%LLVM_ROOT%\lld-link.exe" set "LLD_BIN=%LLVM_ROOT%\lld-link.exe"
+    )
+)
+if "%LLD_BIN%"=="" where lld-link.exe >nul 2>&1 && set "LLD_BIN=lld-link.exe"
+
+if "%OBJCOPY_BIN%"=="" (
+    if not "%LLVM_ROOT%"=="" (
+        if exist "%LLVM_ROOT%\bin\llvm-objcopy.exe" set "OBJCOPY_BIN=%LLVM_ROOT%\bin\llvm-objcopy.exe"
+        if exist "%LLVM_ROOT%\llvm-objcopy.exe" set "OBJCOPY_BIN=%LLVM_ROOT%\llvm-objcopy.exe"
+    )
+)
+if "%OBJCOPY_BIN%"=="" where llvm-objcopy.exe >nul 2>&1 && set "OBJCOPY_BIN=llvm-objcopy.exe"
+
+if "%CLANG_BIN%"=="" (
+    echo [-] ERROR: LLVM environment variable is not configured!
+    exit /b 1
+)
+
+if "%PLUGIN_DLL%"=="" (
+    if exist "..\build\MemLLVM\Release\MemLLVM.dll" set "PLUGIN_DLL=..\build\MemLLVM\Release\MemLLVM.dll"
+    if exist "..\build\Release\MemLLVM.dll" set "PLUGIN_DLL=..\build\Release\MemLLVM.dll"
+    if exist "..\release_artifacts\MemLLVM.dll" set "PLUGIN_DLL=..\release_artifacts\MemLLVM.dll"
+)
 
 echo [*] Compiling showcase.c with MemLLVM Pass Plugin + Freestanding flags...
 "%CLANG_BIN%" "/clang:-fpass-plugin=%PLUGIN_DLL%" ^

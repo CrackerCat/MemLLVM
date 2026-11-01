@@ -22,6 +22,7 @@
   - [7. Thread-Local Storage (TLS) Emulation](#7-thread-local-storage-tls-emulation)
   - [8. Showcase Applications & Verification](#8-showcase-applications--verification)
   - [9. Quick Start & Build Instructions](#9-quick-start--build-instructions)
+  - [10. Visual Studio Integration Guide](#10-visual-studio-integration-guide)
 - [中文技术文档](#中文技术文档)
   - [1. 项目概述与核心哲学](#1-项目概述与核心哲学)
   - [2. 传统 PE 结构在内存执行场景下的根本缺陷](#2-传统-pe-结构在内存执行场景下的根本缺陷)
@@ -32,6 +33,7 @@
   - [7. 线程局部存储（TLS）自举与异常擦除](#7-线程局部存储tls自举与异常擦除)
   - [8. 旗舰级重型应用测试与实战验证](#8-旗舰级重型应用测试与实战验证)
   - [9. 快速上手与编译指南](#9-快速上手与编译指南)
+  - [10. Visual Studio 深度集成与项目对接指南](#10-visual-studio-深度集成与项目对接指南)
 
 ---
 
@@ -278,6 +280,92 @@ python examples\build_all.py
 
 ---
 
+## 10. Visual Studio Integration Guide
+
+MemLLVM integrates seamlessly into Microsoft Visual Studio 2022 / 2019, allowing you to develop, compile, and debug flat `.bin` binaries directly from the IDE using either standard MSBuild `.vcxproj` projects or CMake Open Folder.
+
+### Method A: Native Visual Studio Project (.vcxproj)
+
+1. **Environment Setup & Platform Toolset**:
+   - Ensure **C++ Clang Compiler for Windows** and **MSBuild support for LLVM toolset** are installed via Visual Studio Installer.
+   - Configure the `LLVM_PATH` environment variable pointing to your LLVM root directory (e.g., `C:\LLVM-22-dev`):
+     ```powershell
+     [System.Environment]::SetEnvironmentVariable("LLVM_PATH", "C:\LLVM-22-dev", "User")
+     ```
+   - In Solution Explorer, right-click your Project -> **Properties** -> **Configuration Properties** -> **General** -> **Platform Toolset**: Select **LLVM (clang-cl)**.
+
+2. **C/C++ Compiler Configuration**:
+   - **Configuration Properties** -> **C/C++** -> **General**:
+     - **Additional Include Directories**: Add `$(SolutionDir)ltl\include` (or the path to MemLLVM `ltl\include`).
+   - **Configuration Properties** -> **C/C++** -> **Code Generation**:
+     - **Enable C++ Exceptions**: Set to **No** (`/EHs-c- /GR-`).
+     - **Security Check**: Set to **Disable Security Check (/GS-)**.
+   - **Configuration Properties** -> **C/C++** -> **Command Line**:
+     - Add the following flags in **Additional Options**:
+       ```text
+       /clang:-fpass-plugin="<PathToMemLLVM>\build\MemLLVM\Release\MemLLVM.dll" /clang:-fno-jump-tables /clang:-mno-stack-arg-probe /clang:-fno-builtin
+       ```
+
+3. **Linker Configuration**:
+   - **Configuration Properties** -> **Linker** -> **Input**:
+     - **Ignore All Default Libraries**: Set to **Yes (/NODEFAULTLIB)**.
+     - **Additional Dependencies**: Add `<PathToMemLLVM>\ltl\ltl.lib` along with any necessary Windows API import libraries (e.g., `user32.lib;gdi32.lib;kernel32.lib;d3d11.lib`).
+   - **Configuration Properties** -> **Linker** -> **Advanced**:
+     - **Entry Point**: Set to `main` (or your entry point function name).
+
+4. **Post-Build Extraction to Flat Binary**:
+   - **Configuration Properties** -> **Build Events** -> **Post-Build Event**:
+     - **Command Line**:
+       ```bat
+       python "<PathToMemLLVM>\examples\imgui\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
+       ```
+     - **Description**: `Extracting PE into self-relocating flat binary (.bin)...`
+
+5. **One-Click F5 Debugging & Execution**:
+   - **Configuration Properties** -> **Debugging**:
+     - **Command**: `<PathToMemLLVM>\tests\run_bin.exe`
+     - **Command Arguments**: `"$(TargetDir)$(TargetName).bin"`
+     - **Working Directory**: `$(TargetDir)`
+   - Now pressing **F5** or **Ctrl+F5** will automatically compile with the MemLLVM pass plugin, extract the `.bin` memory image, and launch it inside the memory test harness!
+
+---
+
+### Method B: CMake Project (Open Folder / Visual Studio CMake)
+
+If you manage your project using CMake within Visual Studio:
+1. Specify `clang-cl` as the compiler in `CMakeLists.txt` or `CMakePresets.json`:
+   ```cmake
+   set(CMAKE_C_COMPILER "$ENV{LLVM_PATH}/bin/clang-cl.exe")
+   set(CMAKE_CXX_COMPILER "$ENV{LLVM_PATH}/bin/clang-cl.exe")
+   ```
+2. Append the MemLLVM pass plugin flags to compile options:
+   ```cmake
+   add_compile_options(
+       $<$<COMPILE_LANGUAGE:C,CXX>:
+           /clang:-fpass-plugin=${MEMLLVM_DIR}/build/MemLLVM/Release/MemLLVM.dll
+           /GS-
+           /GR-
+           /clang:-fno-jump-tables
+           /clang:-mno-stack-arg-probe
+           /clang:-fno-builtin
+       >
+   )
+   ```
+3. Strip default CRT dependencies and register a custom post-build step to produce the `.bin`:
+   ```cmake
+   target_link_options(my_app PRIVATE /NODEFAULTLIB /ENTRY:main)
+   target_link_libraries(my_app PRIVATE ${MEMLLVM_DIR}/ltl/ltl.lib)
+
+   add_custom_command(TARGET my_app POST_BUILD
+       COMMAND python ${MEMLLVM_DIR}/examples/imgui/extract_flat_bin.py
+               $<TARGET_FILE:my_app>
+               $<TARGET_FILE_DIR:my_app>/$<TARGET_FILE_BASE_NAME:my_app>.bin
+       COMMENT "Generating position-independent flat binary..."
+   )
+   ```
+
+---
+
 <a name="中文技术文档"></a>
 # 中文技术文档
 
@@ -456,6 +544,92 @@ python examples\build_all.py
 # 运行 Scintilla 现代化代码编辑器
 .\tests\run_bin.exe .\examples\scintilla_editor\scintilla_editor.bin
 ```
+
+---
+
+## 10. Visual Studio 深度集成与项目对接指南
+
+MemLLVM 能够完美融入 Microsoft Visual Studio 2022 / 2019 IDE 开发工作流。您可以直接在 Visual Studio 内编写现代化 C/C++ 业务逻辑，利用 IDE 强大的智能感知（IntelliSense）与代码高亮，并通过一键点击（或按下 `F5`）自动触发编译、Pass 插件变换、扁平二进制提取以及在内存沙盒中拉起运行与断点调试。
+
+### 方案 A：原生 Visual Studio 项目（.vcxproj）对接
+
+1. **环境变量与平台工具集准备**：
+   - 打开 Visual Studio Installer，确认已勾选安装 **适用于 Windows 的 C++ Clang 编译器** 以及 **LLVM 工具集 MSBuild 支持**。
+   - 配置系统环境变量 `LLVM_PATH`，指向您的 LLVM 安装根目录（例如 `C:\LLVM-22-dev`）：
+     ```powershell
+     [System.Environment]::SetEnvironmentVariable("LLVM_PATH", "C:\LLVM-22-dev", "User")
+     ```
+   - 在解决方案资源管理器中右键点击工程 -> **属性** -> **配置属性** -> **常规** -> **平台工具集**：选择 **LLVM (clang-cl)**。
+
+2. **C/C++ 编译器属性配置**：
+   - **配置属性** -> **C/C++** -> **常规**：
+     - **附加包含目录**：添加 `$(SolutionDir)ltl\include`（或 MemLLVM 的 `ltl\include` 路径）。
+   - **配置属性** -> **C/C++** -> **代码生成**：
+     - **启用 C++ 异常**：选择 **否** (`/EHs-c- /GR-`)。
+     - **安全检查**：选择 **禁用安全检查 (/GS-)**。
+   - **配置属性** -> **C/C++** -> **命令行**：
+     - 在 **其他选项** 中填入以下参数：
+       ```text
+       /clang:-fpass-plugin="<PathToMemLLVM>\build\MemLLVM\Release\MemLLVM.dll" /clang:-fno-jump-tables /clang:-mno-stack-arg-probe /clang:-fno-builtin
+       ```
+
+3. **链接器配置（纯净无依赖）**：
+   - **配置属性** -> **链接器** -> **输入**：
+     - **忽略所有默认库**：选择 **是 (/NODEFAULTLIB)**。
+     - **附加依赖项**：添加 `<PathToMemLLVM>\ltl\ltl.lib` 以及项目所需的 Win32 导入库（如 `kernel32.lib;user32.lib;gdi32.lib;d3d11.lib` 等）。
+   - **配置属性** -> **链接器** -> **高级**：
+     - **入口点**：填入 `main`。
+
+4. **配置生成后事件自动提取 `.bin` 镜像**：
+   - **配置属性** -> **生成事件** -> **生成后事件**：
+     - **命令行**：
+       ```bat
+       python "<PathToMemLLVM>\examples\imgui\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
+       ```
+     - **说明**：`正在将 PE 二进制提取并封装为自包含绝对位置无关纯内存镜像 (.bin)...`
+
+5. **配置 F5 一键启动与内存沙盒调试**：
+   - **配置属性** -> **调试**：
+     - **命令**：`<PathToMemLLVM>\tests\run_bin.exe`
+     - **命令参数**：`"$(TargetDir)$(TargetName).bin"`
+     - **工作目录**：`$(TargetDir)`
+   - 配置完成后，直接按下 **F5** 或 **Ctrl+F5**，Visual Studio 将自动调用 `clang-cl` 挂载 `MemLLVM.dll`，完成编译与自重定位链接，提取 `.bin`，并由 `run_bin.exe` 在模拟内存中直接执行！
+
+---
+
+### 方案 B：CMake 工程对接（Visual Studio “打开文件夹”模式）
+
+如果您在 Visual Studio 中使用 CMake 作为工程组织形式：
+1. 在 `CMakeLists.txt` 或 `CMakePresets.json` 中绑定 `clang-cl`：
+   ```cmake
+   set(CMAKE_C_COMPILER "$ENV{LLVM_PATH}/bin/clang-cl.exe")
+   set(CMAKE_CXX_COMPILER "$ENV{LLVM_PATH}/bin/clang-cl.exe")
+   ```
+2. 注入 MemLLVM 核心编译选项：
+   ```cmake
+   add_compile_options(
+       $<$<COMPILE_LANGUAGE:C,CXX>:
+           /clang:-fpass-plugin=${MEMLLVM_DIR}/build/MemLLVM/Release/MemLLVM.dll
+           /GS-
+           /GR-
+           /clang:-fno-jump-tables
+           /clang:-mno-stack-arg-probe
+           /clang:-fno-builtin
+       >
+   )
+   ```
+3. 剥离 CRT 依赖并配置自动化生成 `.bin`：
+   ```cmake
+   target_link_options(my_app PRIVATE /NODEFAULTLIB /ENTRY:main)
+   target_link_libraries(my_app PRIVATE ${MEMLLVM_DIR}/ltl/ltl.lib)
+
+   add_custom_command(TARGET my_app POST_BUILD
+       COMMAND python ${MEMLLVM_DIR}/examples/imgui/extract_flat_bin.py
+               $<TARGET_FILE:my_app>
+               $<TARGET_FILE_DIR:my_app>/$<TARGET_FILE_BASE_NAME:my_app>.bin
+       COMMENT "Generating position-independent flat binary..."
+   )
+   ```
 
 ---
 

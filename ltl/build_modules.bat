@@ -5,7 +5,22 @@ echo =======================================================================
 echo   MemLLVM C++20 Standard Library Module Builder (import std;)
 echo =======================================================================
 
-set CLANGPP=C:\LLVM-22-dev\bin\clang++.exe
+if not "%LLVM_PATH%"=="" set "LLVM_ROOT=%LLVM_PATH%"
+if "%LLVM_ROOT%"=="" if not "%LLVM_DIR%"=="" set "LLVM_ROOT=%LLVM_DIR%"
+if "%LLVM_ROOT%"=="" if not "%LLVM_HOME%"=="" set "LLVM_ROOT=%LLVM_HOME%"
+
+if "%CLANGPP%"=="" (
+    if not "%LLVM_ROOT%"=="" (
+        if exist "%LLVM_ROOT%\bin\clang++.exe" set "CLANGPP=%LLVM_ROOT%\bin\clang++.exe"
+        if exist "%LLVM_ROOT%\clang++.exe" set "CLANGPP=%LLVM_ROOT%\clang++.exe"
+    )
+)
+if "%CLANGPP%"=="" where clang++.exe >nul 2>&1 && set "CLANGPP=clang++.exe"
+
+if "%CLANGPP%"=="" (
+    echo [-] ERROR: LLVM environment variable is not configured!
+    exit /b 1
+)
 set OUT_DIR=%~dp0modules
 
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
