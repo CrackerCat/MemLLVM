@@ -10,8 +10,7 @@ EXAMPLES = [
     ("Box2D 2D Physics Engine", ["python", os.path.join(SCRIPT_DIR, "box2d", "build_box2d.py")], os.path.join(SCRIPT_DIR, "box2d", "box2d.bin")),
     ("CHIP-8 Virtual Machine", ["python", os.path.join(SCRIPT_DIR, "chip8", "build_chip8.py")], os.path.join(SCRIPT_DIR, "chip8", "chip8.bin")),
     ("Classic DOOM Game Engine", ["python", os.path.join(SCRIPT_DIR, "doom", "build_doom.py")], os.path.join(SCRIPT_DIR, "doom", "doom.bin")),
-    ("Dear ImGui DirectX 11 Demo", ["cmd", "/c", os.path.join(SCRIPT_DIR, "imgui", "build_imgui_demo.bat")], os.path.join(SCRIPT_DIR, "imgui", "imgui_demo.bin")),
-    ("Win32 Scintilla Code Editor", ["cmd", "/c", os.path.join(SCRIPT_DIR, "scintilla_editor", "build_scintilla_editor.bat")], os.path.join(SCRIPT_DIR, "scintilla_editor", "scintilla_editor.bin"))
+    ("Dear ImGui DirectX 11 Demo", ["cmd", "/c", os.path.join(SCRIPT_DIR, "imgui", "build_imgui_demo.bat")], os.path.join(SCRIPT_DIR, "imgui", "imgui_demo.bin"))
 ]
 
 def main():

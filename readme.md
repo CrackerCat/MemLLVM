@@ -19,10 +19,12 @@
   - [4. LTL: Freestanding C/C++ Runtime Library](#4-ltl-freestanding-cc-runtime-library)
   - [5. Position-Independent Code & Dynamic Self-Rebase](#5-position-independent-code--dynamic-self-rebase)
   - [6. Dynamic PEB Traversal & ROR13 API Resolution](#6-dynamic-peb-traversal--ror13-api-resolution)
-  - [7. Thread-Local Storage (TLS) Emulation](#7-thread-local-storage-tls-emulation)
-  - [8. Showcase Applications & Verification](#8-showcase-applications--verification)
-  - [9. Quick Start & Build Instructions](#9-quick-start--build-instructions)
-  - [10. Visual Studio Integration Guide](#10-visual-studio-integration-guide)
+  - [7. Thread-Local Storage (TLS) Handling & Strict Boundaries](#7-thread-local-storage-tls-handling--strict-boundaries)
+  - [8. Current Framework Limitations & Roadmap](#8-current-framework-limitations--roadmap)
+  - [9. Showcase Applications & Verification](#9-showcase-applications--verification)
+  - [10. Quick Start & Visual Studio Integration Guide](#10-quick-start--visual-studio-integration-guide)
+  - [11. Acknowledgements (VC-LTL Tribute)](#11-acknowledgements-vc-ltl-tribute)
+  - [12. Star History](#12-star-history)
 - [中文技术文档](#中文技术文档)
   - [1. 项目概述与核心哲学](#1-项目概述与核心哲学)
   - [2. 传统 PE 结构在内存执行场景下的根本缺陷](#2-传统-pe-结构在内存执行场景下的根本缺陷)
@@ -30,10 +32,12 @@
   - [4. LTL：自包含无依赖 C/C++ 现代化运行时](#4-ltl自包含无依赖-cc-现代化运行时)
   - [5. 绝对位置无关码（PIC）与自重定位（Self-Rebase）](#5-绝对位置无关码pic与自重定位self-rebase)
   - [6. PEB 模块链表遍历与 ROR13 哈希动态 IAT 消除](#6-peb-模块链表遍历与-ror13-哈希动态-iat-消除)
-  - [7. 线程局部存储（TLS）自举与异常擦除](#7-线程局部存储tls自举与异常擦除)
-  - [8. 旗舰级重型应用测试与实战验证](#8-旗舰级重型应用测试与实战验证)
-  - [9. 快速上手与编译指南](#9-快速上手与编译指南)
-  - [10. Visual Studio 深度集成与项目对接指南](#10-visual-studio-深度集成与项目对接指南)
+  - [7. 线程局部存储（TLS）处理策略与技术边界](#7-线程局部存储tls处理策略与技术边界)
+  - [8. 框架当前局限性与后续攻坚方向](#8-框架当前局限性与后续攻坚方向)
+  - [9. 旗舰级重型应用测试与实战验证](#9-旗舰级重型应用测试与实战验证)
+  - [10. 极简上手与 Visual Studio 原生项目（.vcxproj）对接指南](#10-极简上手与-visual-studio-原生项目vcxproj对接指南)
+  - [11. 致敬与鸣谢（VC-LTL）](#11-致敬与鸣谢vc-ltl)
+  - [12. Star 历史趋势](#12-star-历史趋势)
 
 ---
 
@@ -87,7 +91,7 @@ Standard compilers target operating system loader environments. Under Windows, a
 1. **Import Address Table (IAT / `.idata`)**: Calls to external Win32 APIs (`VirtualAlloc`, `CreateWindowExW`, etc.) are compiled as indirect calls through pointers in `.rdata` that must be filled by `ntdll.dll` during process bootstrap. In a flat binary, this table does not exist.
 2. **Hardcoded Image Base & Relocations**: Global pointer tables, C++ virtual method tables (`vtable`), and function pointer arrays contain absolute 64-bit virtual addresses predicated on a fixed image base (e.g., `0x140000000`). If loaded at any other base address, memory dereferences cause immediate access violations (`0xC0000005`).
 3. **C++ Runtime & Global Initializers (`.CRT$XCU`)**: C++ static objects and constructors are recorded as function pointer arrays in `.CRT$XCU`. Without the MSVC CRT startup harness (`__scrt_common_main`), static instances remain uninitialized, leading to null vtable crashes.
-4. **Read-Only Data (`.rdata`) Separation**: Constant strings, floating-point literals, and jump tables are relegated to `.rdata`. Standard shellcode loaders allocating a single flat block often break when instructions attempt relative addressing across non-contiguous sections.
+4. **Read-Only Data (`.rdata`) Separation**: Constant strings, floating-point literals, and jump tables are relegated to `.rdata`. Standard loaders allocating a single flat block often break when instructions attempt relative addressing across non-contiguous sections.
 5. **Thread-Local Storage (TLS)**: Modern C++ features like thread-safe local statics (`Meyers Singleton`) invoke `__tls_index` and `_Init_thread_epoch`, referencing `TEB->ThreadLocalStoragePointer` (`gs:[0x58]`), which fault immediately when invoked outside an OS-registered module.
 
 ---
@@ -141,25 +145,25 @@ MemLLVM binaries support true **arbitrary base execution** via a hybrid compilat
 
 1. **Compilation**: Code is compiled with `-fno-jump-tables`, `/GS-`, `/GR-`, and `-mno-stack-arg-probe`.
 2. **Extraction & Relocation Harvesting**: The extractor parses the linked PE executable, gathers all base relocations (`IMAGE_REL_BASED_DIR64`), and appends a compact relocation table to the flat binary.
-3. **Self-Rebase Bootstrap Stub**: A lightweight 64-bit assembly preamble is prepended to the binary entry point:
+3. **ABI-Compliant Self-Rebase Bootstrap Stub**: A lightweight 64-bit assembly preamble is prepended to the binary entry point. It uses only volatile scratch registers (`r8-r11`, `rdx`, `rax`), strictly conforming to the Windows x64 ABI without corrupting callee-saved registers:
 
 ```nasm
-; --- MemLLVM Self-Rebase Bootstrap ---
+; --- MemLLVM ABI-Compliant Self-Rebase Bootstrap ---
 call    $+5
 pop     rdx                       ; RDX = Current runtime RIP
 sub     rdx, STUB_OFFSET          ; RDX = Current base address
 mov     rax, ORIGINAL_IMAGE_BASE  ; RAX = Compile-time image base
-mov     rbx, rdx
-sub     rbx, rax                  ; RBX = Relocation Delta
+mov     r8, rdx
+sub     r8, rax                   ; R8 = Relocation Delta
 jz      .skip_rebase              ; If loaded at compile base, skip
 
-lea     rsi, [rdx + RELOC_TABLE]  ; RSI = Relocation RVA table
-mov     ecx, NUM_RELOCS           ; ECX = Number of relocations
+lea     r9, [rdx + RELOC_TABLE]   ; R9 = Relocation RVA table
+mov     r10d, NUM_RELOCS          ; R10D = Number of relocations
 .rebase_loop:
-mov     eax, [rsi]                ; EAX = Slot RVA
-add     qword ptr [rdx + rax], rbx; Patch slot with runtime Delta
-add     rsi, 4
-dec     ecx
+mov     eax, [r9]                 ; EAX = Slot RVA
+add     qword ptr [rdx + rax], r8 ; Patch slot with runtime Delta
+add     r9, 4
+dec     r10d
 jnz     .rebase_loop
 
 .skip_rebase:
@@ -180,25 +184,25 @@ MemLLVM completely eliminates the PE Import Address Table (IAT). When an externa
                         [PEB_LDR_DATA: Ldr]
                                      |
                                      v
-             [InLoadOrderModuleList / InMemoryOrderModuleList]
+              [InLoadOrderModuleList / InMemoryOrderModuleList]
                                      |
-                +--------------------+--------------------+
-                |                    |                    |
-                v                    v                    v
-          [ntdll.dll]       [kernel32.dll]        [user32.dll]
-                |
-                v
-      [Parse Export Directory (IMAGE_EXPORT_DIRECTORY)]
-                |
-        +-------+-------+
-        |               |
-        v               v
-  [AddressOfNames]  [AddressOfFunctions]
-        |               |
-        v               v
-  [Compute ROR13]   [Retrieve Function Pointer]
-        |
-        +---> [Match Hash: 0x75da1966 -> Dispatch Call]
+                 +--------------------+--------------------+
+                 |                    |                    |
+                 v                    v                    v
+           [ntdll.dll]       [kernel32.dll]        [user32.dll]
+                 |
+                 v
+       [Parse Export Directory (IMAGE_EXPORT_DIRECTORY)]
+                 |
+         +-------+-------+
+         |               |
+         v               v
+   [AddressOfNames]  [AddressOfFunctions]
+         |               |
+         v               v
+   [Compute ROR13]   [Retrieve Function Pointer]
+         |
+         +---> [Match Hash: 0x75da1966 -> Dispatch Call]
 ```
 
 ### Hash Function (ROR13)
@@ -215,18 +219,37 @@ constexpr uint32_t HashApiName(const char* name) {
 
 ---
 
-## 7. Thread-Local Storage (TLS) Emulation
+## 7. Thread-Local Storage (TLS) Handling & Strict Boundaries
 
-Standard TLS mechanisms allocate slots in `TEB->ThreadLocalStoragePointer`. In a flat binary, this crashes because no OS module index is assigned. MemLLVM resolves this through two complementary strategies:
+Standard Windows C++ compilers rely on OS-managed TLS infrastructure (`TEB->ThreadLocalStoragePointer` at `gs:[0x58]`), which faults immediately when invoked outside a PE-loader-registered module because no module index (`__tls_index`) is assigned.
 
-1. **IR-Level TLS Erasure**: `StlStubPass` detects local thread-safe statics and redirects epoch checks from thread-local variables to atomic global variables, eliminating `__tls_index`.
-2. **Runtime TEB Injection**: For complex multi-threaded workloads, `tests/run_bin.c` initializes a valid TLS descriptor array in the host thread environment (`gs:[0x58]`), providing a compliant thread-local block for advanced runtimes.
+* **What MemLLVM Solves**:
+  MemLLVM's `StlStubPass` detects compiler-generated TLS variables used for thread-safe local static variables (Meyers Singleton pattern) and rewrites epoch checks into lock-free atomic compare-and-swap operations on non-TLS global storage. This completely removes dependencies on `_Init_thread_epoch` and `__tls_index`.
+* **Strict Architectural Boundary (Zero Assumptions on Host)**:
+  Raw flat machine code running in pure memory without an operating system PE loader cannot natively allocate or initialize TEB TLS slots. **MemLLVM does not make ambiguous claims and imposes NO requirements or modifications on the host runner.** Therefore, raw flat binaries **cannot natively support the C++ `thread_local` keyword**. Applications requiring thread-local storage in flat binaries should use explicit Win32 TLS APIs (`TlsAlloc`, `TlsGetValue`, `TlsSetValue`).
 
 ---
 
-## 8. Showcase Applications & Verification
+## 8. Current Framework Limitations & Roadmap
 
-MemLLVM has been tested and verified across five major industrial-grade C and C++ projects, each running as a pure standalone `.bin` without any companion DLLs:
+MemLLVM aims to provide maximum modern C/C++ capability in raw flat machine code. However, due to operating outside the Windows PE loader, several fundamental OS abstractions cannot currently be processed natively:
+
+1. **C++ Exception Handling (`try` / `catch` / `throw`)**:
+   - Windows x64 structured exception handling and C++ exception unwinding strictly depend on `.pdata` and `.xdata` function tables registered with the NT kernel (`RtlAddFunctionTable`). In a flat memory binary, executing a `throw` will crash because the kernel unwinder cannot locate the personality routine or call frame handlers.
+   - *Current Requirement*: Code must be compiled with exceptions disabled (`/EHs-c-`, `/GR-`, `/clang:-fno-exceptions`).
+   - *Future Roadmap*: We are actively developing a self-registering runtime unwinder that dynamically calls `RtlAddFunctionTable` at binary startup to restore full C++ exception support.
+2. **Windows PE Resources (`.rsrc` / RC Files)**:
+   - Flat binaries do not have PE section headers or standard resource directory tables. Windows APIs like `FindResource`, `LoadIcon`, and `LoadAccelerators` cannot resolve resources from a flat memory image without a valid `HMODULE`.
+   - *Current Requirement*: Assets, textures, shaders, and data files must be embedded as inline byte arrays (e.g. C headers, bytecode arrays, or companion data files like `doom1.wad`).
+   - *Future Roadmap*: Exploring in-memory virtual resource table emulation and pseudo-handle hooks.
+3. **Native C++ `thread_local` Keyword**:
+   - As noted in Section 7, flat binaries lack PE loader TLS allocation; use `TlsAlloc()` series APIs instead.
+
+---
+
+## 9. Showcase Applications & Verification
+
+MemLLVM has been tested and verified across major industrial-grade C and C++ projects, each running as a pure standalone `.bin` without any companion DLLs:
 
 | Application | Technology Stack | Binary Size | Verified Capabilities |
 | :--- | :--- | :--- | :--- |
@@ -234,135 +257,63 @@ MemLLVM has been tested and verified across five major industrial-grade C and C+
 | **CHIP-8 Virtual Machine** | C++20 | **42 KB** | Full virtual CPU opcode interpreter, 35 instructions, sound buzzer, frame timer, 64x32 monochrome display matrix running *Pong* and *Tetris*. |
 | **Classic DOOM** | Pure C (83 files) | **703 KB** | Full id Software DOOM engine (doomgeneric), BSP rendering, fixed-point math, live keyboard input, software audio mixer, IWAD file streaming. |
 | **Dear ImGui (v1.91+)** | C++17 | **1.70 MB** | Full immediate-mode GUI, docking, multi-viewports, menus, plots, styling editor, rendered via hardware-accelerated DirectX 11. |
-| **Scintilla Code Editor** | C++20 | **980 KB** | Full Scintilla text editing engine, Direct2D/DirectWrite hardware text rasterization, multi-level undo/redo, dynamic margins, caret engine. |
 
 ---
 
-## 9. Quick Start & Build Instructions
+## 10. Quick Start & Visual Studio Integration Guide
 
-### Prerequisites
-* Windows 10/11 x64
-* Visual Studio 2022 (MSVC v143+)
-* LLVM / Clang 18+ (with `clang-cl.exe`, `lld-link.exe`, and CMake configs)
-* Python 3.10+ (with `pefile`: `pip install pefile`)
+The recommended workflow is to use the pre-packaged SDK from GitHub Releases and configure the `MEMLLVM_DIR` environment variable.
 
-### 1. Build MemLLVM Plugin
-```powershell
-git clone https://github.com/Laster-dev/MemLLVM.git
-cd MemLLVM
-cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DLLVM_DIR="<path_to_llvm>/lib/cmake/llvm"
-cmake --build build --config Release --target MemLLVM
-```
+### 1. Download & Extract SDK
+1. Download `MemLLVM-SDK-windows-x64.zip` from the latest [GitHub Release](https://github.com/Laster-dev/MemLLVM/releases).
+2. Extract the archive to any directory on your system (e.g., `C:\MemLLVM`).
+3. Add the environment variable `MEMLLVM_DIR`:
+   ```powershell
+   [System.Environment]::SetEnvironmentVariable("MEMLLVM_DIR", "C:\MemLLVM", "User")
+   ```
+   *(Optional)* Add `%MEMLLVM_DIR%\bin` to your system `PATH`.
 
-### 2. Build LTL Runtime Library
-```powershell
-cmd /c ltl\build_ltl.bat
-```
+### 2. Native Visual Studio Project (.vcxproj) Integration
+1. Open your Visual Studio project properties.
+2. **General** -> **Platform Toolset**: Select **LLVM (clang-cl)**.
+3. **C/C++** -> **General** -> **Additional Include Directories**:
+   ```text
+   $(MEMLLVM_DIR)\include;$(MEMLLVM_DIR)\ltl\include;%(AdditionalIncludeDirectories)
+   ```
+4. **C/C++** -> **Code Generation**:
+   - **Enable C++ Exceptions**: Set to **No** (`/EHs-c- /GR-`).
+   - **Security Check**: Set to **Disable Security Check (/GS-)**.
+5. **C/C++** -> **Command Line** -> **Additional Options**:
+   ```text
+   /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll" /clang:-fno-jump-tables /clang:-mno-stack-arg-probe /clang:-fno-builtin
+   ```
+6. **Linker** -> **General** -> **Additional Library Directories**:
+   ```text
+   $(MEMLLVM_DIR)\ltl;$(MEMLLVM_DIR)\lib;%(AdditionalLibraryDirectories)
+   ```
+7. **Linker** -> **Input**:
+   - **Ignore All Default Libraries**: **Yes (/NODEFAULTLIB)**.
+   - **Additional Dependencies**: Add `ltl.lib;` plus any required Win32 import libraries (`kernel32.lib;user32.lib;gdi32.lib;d3d11.lib`).
+8. **Linker** -> **Advanced** -> **Entry Point**: Set to `main`.
+9. **Build Events** -> **Post-Build Event**:
+   ```bat
+   python "$(MEMLLVM_DIR)\examples\imgui\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
+   ```
 
-### 3. Build Test Loader Harness
-```powershell
-clang-cl /O2 /Fe:tests\run_bin.exe tests\run_bin.c
-```
-
-### 4. Build All Showcase Examples
-```powershell
-python examples\build_all.py
-```
-
-### 5. Execute Any Flat Binary in Memory
-```powershell
-.\tests\run_bin.exe .\examples\box2d\box2d.bin
-.\tests\run_bin.exe .\examples\chip8\chip8.bin
-.\tests\run_bin.exe .\examples\doom\doom.bin
-.\tests\run_bin.exe .\examples\imgui\imgui_demo.bin
-.\tests\run_bin.exe .\examples\scintilla_editor\scintilla_editor.bin
-```
+You can now use `$(MEMLLVM_DIR)\Tools\SCLoader.exe` to run, inspect, and debug the resulting `.bin` file in an isolated memory harness.
 
 ---
 
-## 10. Visual Studio Integration Guide
+## 11. Acknowledgements (VC-LTL Tribute)
 
-MemLLVM integrates seamlessly into Microsoft Visual Studio 2022 / 2019, allowing you to develop, compile, and debug flat `.bin` binaries directly from the IDE using either standard MSBuild `.vcxproj` projects or CMake Open Folder.
-
-### Method A: Native Visual Studio Project (.vcxproj)
-
-1. **Environment Setup & Platform Toolset**:
-   - Ensure **C++ Clang Compiler for Windows** and **MSBuild support for LLVM toolset** are installed via Visual Studio Installer.
-   - Configure the `LLVM_PATH` environment variable pointing to your LLVM root directory (e.g., `C:\LLVM-22-dev`):
-     ```powershell
-     [System.Environment]::SetEnvironmentVariable("LLVM_PATH", "C:\LLVM-22-dev", "User")
-     ```
-   - In Solution Explorer, right-click your Project -> **Properties** -> **Configuration Properties** -> **General** -> **Platform Toolset**: Select **LLVM (clang-cl)**.
-
-2. **C/C++ Compiler Configuration**:
-   - **Configuration Properties** -> **C/C++** -> **General**:
-     - **Additional Include Directories**: Add `$(SolutionDir)ltl\include` (or the path to MemLLVM `ltl\include`).
-   - **Configuration Properties** -> **C/C++** -> **Code Generation**:
-     - **Enable C++ Exceptions**: Set to **No** (`/EHs-c- /GR-`).
-     - **Security Check**: Set to **Disable Security Check (/GS-)**.
-   - **Configuration Properties** -> **C/C++** -> **Command Line**:
-     - Add the following flags in **Additional Options**:
-       ```text
-       /clang:-fpass-plugin="<PathToMemLLVM>\build\MemLLVM\Release\MemLLVM.dll" /clang:-fno-jump-tables /clang:-mno-stack-arg-probe /clang:-fno-builtin
-       ```
-
-3. **Linker Configuration**:
-   - **Configuration Properties** -> **Linker** -> **Input**:
-     - **Ignore All Default Libraries**: Set to **Yes (/NODEFAULTLIB)**.
-     - **Additional Dependencies**: Add `<PathToMemLLVM>\ltl\ltl.lib` along with any necessary Windows API import libraries (e.g., `user32.lib;gdi32.lib;kernel32.lib;d3d11.lib`).
-   - **Configuration Properties** -> **Linker** -> **Advanced**:
-     - **Entry Point**: Set to `main` (or your entry point function name).
-
-4. **Post-Build Extraction to Flat Binary**:
-   - **Configuration Properties** -> **Build Events** -> **Post-Build Event**:
-     - **Command Line**:
-       ```bat
-       python "<PathToMemLLVM>\examples\imgui\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
-       ```
-     - **Description**: `Extracting PE into self-relocating flat binary (.bin)...`
-
-5. **One-Click F5 Debugging & Execution**:
-   - **Configuration Properties** -> **Debugging**:
-     - **Command**: `<PathToMemLLVM>\tests\run_bin.exe`
-     - **Command Arguments**: `"$(TargetDir)$(TargetName).bin"`
-     - **Working Directory**: `$(TargetDir)`
-   - Now pressing **F5** or **Ctrl+F5** will automatically compile with the MemLLVM pass plugin, extract the `.bin` memory image, and launch it inside the memory test harness!
+Special tribute and heartfelt thanks to **[VC-LTL](https://github.com/Chuyu-Team/VC-LTL5)** and the Chuyu-Team!  
+VC-LTL has set an exceptional benchmark in lightweight Windows CRT engineering and dependency-free runtime architecture. MemLLVM's freestanding LTL runtime design is deeply inspired by and indebted to the pioneering open-source work of the VC-LTL project.
 
 ---
 
-### Method B: CMake Project (Open Folder / Visual Studio CMake)
+## 12. Star History
 
-If you manage your project using CMake within Visual Studio:
-1. Specify `clang-cl` as the compiler in `CMakeLists.txt` or `CMakePresets.json`:
-   ```cmake
-   set(CMAKE_C_COMPILER "$ENV{LLVM_PATH}/bin/clang-cl.exe")
-   set(CMAKE_CXX_COMPILER "$ENV{LLVM_PATH}/bin/clang-cl.exe")
-   ```
-2. Append the MemLLVM pass plugin flags to compile options:
-   ```cmake
-   add_compile_options(
-       $<$<COMPILE_LANGUAGE:C,CXX>:
-           /clang:-fpass-plugin=${MEMLLVM_DIR}/build/MemLLVM/Release/MemLLVM.dll
-           /GS-
-           /GR-
-           /clang:-fno-jump-tables
-           /clang:-mno-stack-arg-probe
-           /clang:-fno-builtin
-       >
-   )
-   ```
-3. Strip default CRT dependencies and register a custom post-build step to produce the `.bin`:
-   ```cmake
-   target_link_options(my_app PRIVATE /NODEFAULTLIB /ENTRY:main)
-   target_link_libraries(my_app PRIVATE ${MEMLLVM_DIR}/ltl/ltl.lib)
-
-   add_custom_command(TARGET my_app POST_BUILD
-       COMMAND python ${MEMLLVM_DIR}/examples/imgui/extract_flat_bin.py
-               $<TARGET_FILE:my_app>
-               $<TARGET_FILE_DIR:my_app>/$<TARGET_FILE_BASE_NAME:my_app>.bin
-       COMMENT "Generating position-independent flat binary..."
-   )
-   ```
+[![Star History Chart](https://api.star-history.com/svg?repos=Laster-dev/MemLLVM&type=Date)](https://star-history.com/#Laster-dev/MemLLVM&Date)
 
 ---
 
@@ -371,120 +322,147 @@ If you manage your project using CMake within Visual Studio:
 
 ## 1. 项目概述与核心哲学
 
-**MemLLVM** 是一套基于 **LLVM New Pass Manager** 架构的深度编译器变换框架与轻量级自举运行时。专为 Windows 平台下的 `clang-cl` 工具链设计，MemLLVM 能够将现代化高层 C/C++20 源代码直接编译为**自包含、绝对位置无关、自重定位的纯内存扁平二进制镜像（Flat Binary / `.bin`）**。
+**MemLLVM** 是一个基于 **LLVM New Pass Manager（新版通行证管理器）** 架构的工业级编译器级插件与独立自举运行时框架。专为 Windows 平台 `clang-cl` 工具链量身定制，能够将现代高阶 C 与 C++20 代码直接编译转化为 **绝对位置无关、自包含、自重定位的纯内存扁平机器码镜像（.bin）**。
 
-生成的机器码完全脱离操作系统的标准可执行文件加载器（PE Loader），无需任何 `.exe`、`.dll` 格式包装或系统加载器引导，可直接被投递到任意可读写执行（RWX）的内存区域，通过原生函数指针调用 `((void(*)())buf)()` 瞬间自举拉起运行。
+生成的二进制无需依赖 Windows 操作系统的 PE 加载器（如 `ntdll!LdrLoadDll`、节区映射、导入表绑定等），可直接被映射至任意内存页（如 `PAGE_EXECUTE_READWRITE`）并立即无缝执行。
 
-与业界现有的 Payload 转换工具、Shellcode 打包器或反射加载器相比，MemLLVM 具有根本性的架构创新：
-- **编译期 IR 级原生干预**：在 LLVM 中间表示（IR）层重构代码生成逻辑，无任何运行时外挂壳或 Hook 注入。
-- **现代化 C++ 标准全支持**：全面支持 C++ 模板、虚函数表（vtable）、全局构造与析构、异常擦除、多线程同步、标准流及 DirectX/Direct2D 原生图形管道。
-- **零外部导入表依赖**：通过编译期符号哈希与运行时 PEB/EAT 动态遍历，彻底消除 PE 导入地址表（IAT）。
+与传统基于外壳打包器（Packer）、内存 PE 模拟器（Reflective DLL Injection）或二进制补丁（Hooking）的方案不同，MemLLVM 直接在 **LLVM 中间表示（IR）层** 进行 AST/IR 级深度重构，在现代 C++ 高级语言抽象（虚表多态、模板元编程、全局对象生命周期、并发多线程、DirectX/Direct2D 图形）与纯内存代码严苛边界之间架起坚固桥梁。
 
 ---
 
 ## 2. 传统 PE 结构在内存执行场景下的根本缺陷
 
-传统的 C/C++ 编译器针对的是常规操作系统进程模型，生成的二进制严重依赖 PE 文件结构：
+在 Windows 操作系统中，标准编译器输出的 `.exe` 与 `.dll` 均遵循 PE（Portable Executable）规范，具有对操作系统环境的强依赖：
 
-1. **导入表绑定（IAT / `.idata`）**：调用外部 Win32 API（如 `VirtualAlloc`、`CreateWindowExW`）时，编译器生成的是基于 `.rdata` 导入表的间接寻址指令。在内存裸跑场景下，该导入表根本不存在，导致空指针崩溃。
-2. **写死基址与绝对重定位**：虚函数表（vtable）、全局指针变量、回调函数数组包含写死的 64 位绝对虚拟地址（默认基于 `0x140000000`）。一旦加载基址改变且未执行重定位，立刻触发 `0xC0000005` 内存访问越界。
-3. **C++ 全局初始化缺失（`.CRT$XCU`）**：C++ 全局对象与静态实例依赖 MSVC CRT 初始化链（`__scrt_common_main`）遍历 `.CRT$XCU` 段。在裸内存代码中，静态对象未经构造即被使用，引发纯虚函数调用崩溃。
-4. **多段分离与内存碎片**：代码段（`.text`）、只读数据段（`.rdata`）、全局数据段（`.data`）分散存储，无法直接以连续扁平字节流形式加载。
-5. **线程局部存储（TLS）依赖**：现代化 C++ 的局部静态变量（Meyers 单例）依赖 `__tls_index` 和 `TEB->ThreadLocalStoragePointer`（`gs:[0x58]`），在无 OS 模块登记的状态下执行必将引发蓝屏或崩溃。
+1. **导入地址表（IAT / `.idata`）**：调用外部 Win32 API 均被编译为通过导入表的间接寻址，必须由系统内核加载器完成地址填充。在纯内存扁平代码中不存在 IAT。
+2. **硬编码基址与重定位依赖**：全局指针数组、虚函数表（`vtable`）以及函数指针均依赖固定基地址（如 `0x140000000`）。一旦装载于非预期基址，指针解引用直接触发非法访问崩溃（`0xC0000005`）。
+3. **C++ 静态对象初始化链（`.CRT$XCU`）**：全局对象的构造函数指针数组存放在 `.CRT$XCU` 段中。脱离 MSVC CRT 启动引导程序，对象构造函数不会被执行，直接导致野指针与虚表空指针崩溃。
+4. **只读数据段（`.rdata`）隔离**：常量字符串、浮点数常量和跳转表默认存放在只读段。脱离 PE 映射时，跨节区的相对地址偏移极易失效。
+5. **线程局部存储（TLS）**：C++ 局部静态变量的线程安全初始化依赖于 `__tls_index` 和 `_Init_thread_epoch`，脱离操作系统注册模块时会直接引发 TEB 解引用崩溃。
 
 ---
 
 ## 3. MemLLVM 编译管线流水线架构
 
-MemLLVM 以插件形式通过 `-fpass-plugin=MemLLVM.dll` 挂载至 Clang，在 `registerOptimizerLastEPCallback` 优化终点注入了 8 大核心变换 Pass：
+MemLLVM 通过 `-fpass-plugin=MemLLVM.dll` 注入 Clang 编译前端，通过 `registerOptimizerLastEPCallback` 挂载 8 大优化 Pass：
 
-```
-+----------------------------------------------------------------------------------------+
-|                            MemLLVM 八大核心 Pass 编译流水线                              |
-+----------------------------------------------------------------------------------------+
-| 1. AutoMemoryPass       -> 合成原生堆分配原语 (malloc / free / operator new)            |
-| 2. StlStubPass          -> 擦除 MSVC 异常处理链与 TLS 依赖，生成安全陷阱桩              |
-| 3. GlobalLifecyclePass  -> 提取 .CRT$XCU 全局构造与析构，在 @main 入口/出口自动排障调用 |
-| 4. GlobalSectionPass    -> 合并代码段与数据段，消除段分散与内存碎片                      |
-| 5. GlobalPointerPass    -> 扫描静态虚表与指针表，注入 RIP 动态自重定位逻辑              |
-| 6. AutoLoadLibraryPass  -> 静态分析未载入的子系统 DLL，注入自动动态按需加载代码          |
-| 7. StackStringPass      -> 将只读字符串常量展开至函数栈帧，抹除 .rdata 字符串痕迹       |
-| 8. ApiResolvePass       -> 将外部 API 调用全面重写为 PEB 遍历 + ROR13 哈希动态解析       |
-+----------------------------------------------------------------------------------------+
-```
+### 3.1 `AutoMemoryPass`（内存管理自举 Pass）
+深度扫描 IR 级别的内存申请与释放指令，自动合成独立的 `malloc`、`free`、`operator new`、`operator new[]`、`operator delete` 和 `operator delete[]` 实现，底层直接桥接至从 `PEB->ProcessHeap` 动态查询的系统原生堆分配 API（`HeapAlloc` / `HeapFree`）。
 
-### 核心 Pass 技术详解：
-* **`AutoMemoryPass`**：拦截模块中所有的内存分配请求，在 LLVM IR 级就地合成无依赖的 `malloc`、`free`、`new`、`delete` 实现，底层直接绑定当前进程的 `PEB->ProcessHeap`。
-* **`StlStubPass`**：自动识别并安全阻断 MSVC 标准库抛出的异常体系（`_CxxThrowException`、`?_Xlength_error@std@@...` 等），将其重定向至确定性终止陷阱；消除静态变量初始化中的 `_Init_thread_epoch` TLS 依赖。
-* **`GlobalLifecyclePass`**：彻底废弃 `.CRT$XCU` 段，将所有静态构造函数按优先级有序编排，在 entry 函数起始处显式依次调用；同时在所有 `ret` 指令前织入逆序 LIFO 析构调用链。
-* **`GlobalPointerPass`**：静态深度分析所有全局指针数组、虚函数表，在代码头部生成相对寻址重定位桩，运行时动态获取当前实际基址并对每一个指针槽位补正 Delta 偏差。
-* **`ApiResolvePass`**：将原本针对外部 DLL 导出的直接 `call` 指令替换为基于 ROR13 算法的内存解析桩，彻底粉碎任何对 IAT 导入表的依赖。
+### 3.2 `StlStubPass`（异常消除与 TLS 降级 Pass）
+消除 MSVC C++ 异常与 TLS 依赖。将 STL 抛出的异常调度器替换为确定的错误捕获桩；同时将局部静态变量的线程安全检测由 TLS 变量降级为原子内存比较，彻底消除对 `_Init_thread_epoch` 和 `__tls_index` 的依赖。
+
+### 3.3 `GlobalLifecyclePass`（全局对象生命周期 Pass）
+彻底消除 `.CRT$XCU` 与 `.CRT$XTX` 段。在 `@main` 入口最前侧注入对全局静态构造函数的顺序调用链，并在所有退出分支前逆序注入对应的析构函数链。
+
+### 3.4 `GlobalSectionPass`（段区扁平化合并 Pass）
+遍历所有全局变量、静态变量和常量表，将代码段、数据段、BSS 段和只读数据段强制合并至统一的连续段中，彻底消除多节区分片导致的内存离散问题。
+
+### 3.5 `GlobalPointerPass`（全局指针与虚表自适应重定位 Pass）
+扫描模块中的全局函数指针表与虚函数表（`vtable`），在运行时动态查询当前真实加载基址，并将差值（`Delta`）自动回写修补至各个指针槽位中。
+
+### 3.6 `AutoLoadLibraryPass`（动态依赖加载 Pass）
+检测外调 API 所属的动态链接库。若属于非默认驻留 DLL（如 `d3d11.dll`、`dxgi.dll`、`d2d1.dll`、`winmm.dll`），自动注入动态 `LoadLibraryA` 探测与自愈逻辑。
+
+### 3.7 `StackStringPass`（栈字符串混淆 Pass）
+将原本存放在 `.rdata` 中的字符串常量直接降解为函数栈帧上的即时寄存器赋值指令（`mov qword ptr [rsp+...], imm64`），实现数据段字符串的物理擦除。
+
+### 3.8 `ApiResolvePass`（PEB/ROR13 动态哈希解析 Pass）
+MemLLVM 的核心 IAT 消除引擎。遍历所有外部函数调用指令，计算目标模块与 API 的 ROR13 哈希值，并将直接调用改写为内置的动态解析桩（`__memllvm_resolve_api`）。
 
 ---
 
 ## 4. LTL：自包含无依赖 C/C++ 现代化运行时
 
-为了让高层 C++ 源码无需链接臃肿且包含位置相关代码的微软官方 CRT（`msvcrt.dll` / `ucrt.lib`），MemLLVM 配套自研了 **LTL (Lightweight Template Library)** 轻量级运行时：
+MemLLVM 附带轻量级无依赖独立运行时 **LTL（Lightweight Template Library）**：
 
-- **自包含内存管理**：内置高性能 Arena 区域内存分配器与多段合并内存池。
-- **现代化流式 I/O**：完整重写 `std::cout`、`std::cin`、`std::fstream` 与 `std::stringstream`，脱离标准句柄与文件描述符束缚。
-- **高并发多线程系统**：完整提供 `std::thread`、`std::mutex`、`std::condition_variable`、`std::shared_mutex`、`std::async`、`std::future`，底层直接映射至 Windows 原生 SRW 读写锁与条件变量。
-- **正规表达式引擎**：纯 C++ 实现的轻量级 `std::regex` 引擎，完整支持 ECMAScript 标准正则匹配。
-- **标准文件系统**：支持 C++17 `std::filesystem::path` 跨路径解析与 Win32 文件枚举。
+* **高性能内存分配器**：多阶桶式 Arena 快速分配器与对齐分配接口。
+* **标准 I/O 流**：脱离 OS 文件句柄的完整 `std::cout`、`std::cin`、`std::cerr`、`std::fstream` 与 `std::stringstream` 实现。
+* **多线程与并发原语**：基于 Windows 原生 SRW 锁和条件变量实现的 `std::thread`、`std::mutex`、`std::condition_variable`、`std::shared_mutex`、`std::async` 与 `std::future`。
+* **正则表达式引擎**：自包含的 `std::regex` 引擎。
+* **文件系统**：映射至原生 Win32 文件枚举接口的 `std::filesystem::path` 与目录迭代器。
+* **字符集与宽字符处理**：内置 UTF-8 与 UTF-16 宽字符串编解码，不依赖宿主代码页。
 
 ---
 
 ## 5. 绝对位置无关码（PIC）与自重定位（Self-Rebase）
 
-MemLLVM 生成的二进制具备完美的**自愈合与动态自重定位能力**：
+MemLLVM 扁平二进制支持任意基址加载，前端采用符合 Windows x64 ABI 标准的自重定位引导桩，仅使用易失寄存器（`r8-r11`, `rdx`, `rax`），严禁破坏调用者的非易失寄存器：
 
-1. **编译期约束**：使用 `/GS-`（关闭安全 Cookie 栈保护）、`/GR-`（关闭运行时类型信息 RTTI）、`-fno-jump-tables`（消除只读跳转表）保证代码段自身绝对纯净。
-2. **重定位表嵌入**：由 flat 提取脚本自动从 PE 产物中检索所有 `IMAGE_REL_BASED_DIR64` 重定位项，压缩后附带于平坦二进制尾部。
-3. **自重定位引导桩（Bootstrap Stub）**：扁平二进制入口首先执行一段精简汇编：
-   - 通过 `call $+5; pop rdx` 配合相对减法，动态求得当前二进制在内存中的实际起始物理地址。
-   - 比较实际物理地址与编译预设基址，计算出偏差值 $\Delta = \text{ActualBase} - \text{OrigBase}$。
-   - 若 $\Delta \neq 0$，则循环遍历内置重定位表，对虚表与全局指针槽位逐一加上 $\Delta$ 完成现场自修正。
-   - 恢复入口机器码并无缝长跳（`jmp rax`）至主业务逻辑入口 `@main`。
+```nasm
+; --- MemLLVM 严格遵循 x64 ABI 的自重定位引导桩 ---
+call    $+5
+pop     rdx                       ; RDX = 当前执行时的 RIP
+sub     rdx, STUB_OFFSET          ; RDX = 扁平镜像当前内存基地址
+mov     rax, ORIGINAL_IMAGE_BASE  ; RAX = 编译时基地址
+mov     r8, rdx
+sub     r8, rax                   ; R8 = 重定位偏差 Delta
+jz      .skip_rebase              ; 若恰好加载于编译基址，跳过重定位
+
+lea     r9, [rdx + RELOC_TABLE]   ; R9 = 重定位 RVA 表首地址
+mov     r10d, NUM_RELOCS          ; R10D = 重定位项数量
+.rebase_loop:
+mov     eax, [r9]                 ; EAX = 需要重定位的槽位相对偏移
+add     qword ptr [rdx + rax], r8 ; 将真实偏差累加回目标槽位
+add     r9, 4
+dec     r10d
+jnz     .rebase_loop
+
+.skip_rebase:
+lea     rax, [rdx + MAIN_OFFSET]
+jmp     rax                       ; 跳入合成后的程序主入口 @main
+```
 
 ---
 
 ## 6. PEB 模块链表遍历与 ROR13 哈希动态 IAT 消除
 
-MemLLVM 内部集成超高效率的运行时 API 动态查找引擎：
+通过从 `gs:[0x60]` 访问当前进程环境块（PEB），解析导出表并计算函数名 ROR13 哈希，实现运行时动态无感绑定：
 
-1. **定位 PEB**：通过 64 位段寄存器 `gs:[0x60]` 直达当前进程的 `PEB`。
-2. **遍历模块**：访问 `PEB->Ldr->InLoadOrderModuleList` 双向链表，对比已加载 DLL 的模块名称哈希。
-3. **导出表匹配**：定位目标 DLL 的 `IMAGE_EXPORT_DIRECTORY`，遍历 `AddressOfNames` 名字表，通过 ROR13 哈希算法极速比对。
-4. **获取地址并调用**：经 `AddressOfNameOrdinals` 与 `AddressOfFunctions` 索引求出目标函数虚拟地址，发起间接调用。
-
-```
-[GS:0x60] -> PEB -> Ldr -> InMemoryOrderModuleList
-                               |
-                   +-----------+-----------+
-                   |                       |
-             ntdll.dll               kernel32.dll
-                   |                       |
-             导出表解析 (EAT)         导出表解析 (EAT)
-                   |                       |
-             ROR13 哈希计算           ROR13 哈希计算
-                   |                       |
-                   +-----------> 命中目标函数指针 -> 直接调用
+```cpp
+constexpr uint32_t HashApiName(const char* name) {
+    uint32_t hash = 0;
+    while (*name) {
+        hash = (hash >> 13) | (hash << (32 - 13));
+        hash += static_cast<uint8_t>(*name++);
+    }
+    return hash;
+}
 ```
 
 ---
 
-## 7. 线程局部存储（TLS）自举与异常擦除
+## 7. 线程局部存储（TLS）处理策略与技术边界
 
-在裸二进制中调用 TLS 会因为系统未分配 `__tls_index` 而导致空指针解引用。MemLLVM 采用双轨方案攻克此难题：
+在原生 Windows C++ 开发中，编译器生成的 TLS 访问依赖于操作系统 PE 加载器分配的模块索引（`__tls_index`）以及线程环境块（`TEB->ThreadLocalStoragePointer`，位于 `gs:[0x58]`）。在无 PE 加载器介入的纯内存裸二进制中，此机制会因空指针解引用立即引发崩溃。
 
-1. **IR 层消除 TLS 依赖**：`StlStubPass` 将局部静态变量的线程安全检测由 TLS 变量降级为原子内存比较，彻底移除对 `_Init_thread_epoch` 和 `__tls_index` 的依赖。
-2. **测试载体环境仿真**：在测试执行器 `run_bin.c` 中，自动在主线程的 `gs:[0x58]` 区域开辟兼容的 TLS 指针数组，为多线程工作流提供安全的运行宿主环境。
+* **MemLLVM 解决的范围**：
+  MemLLVM 通过 `StlStubPass` 深度分析 IR，识别编译器为局部静态变量线程安全初始化（Meyers 单例模式）插入的 TLS 检查，并将其改写为基于非 TLS 全局变量的原子比较交换（CAS），彻底消除了对 `_Init_thread_epoch` 和 `__tls_index` 的依赖。
+* **明确的技术边界（不对宿主运行器作任何隐式假设）**：
+  纯内存扁平二进制在脱离 PE 引导时，任何外部宿主（无论是测试 Harness 还是真实业务宿主）均未在操作系统内部为其分配专属 TLS 槽位。**行就是行，不行就是不行——MemLLVM 坚决不对宿主环境提出任何特殊侵入要求。** 因此，纯内存裸二进制**无法原生支持 C++ `thread_local` 关键字**。若业务确实需要线程私有存储，应使用标准 Win32 API（`TlsAlloc`、`TlsGetValue`、`TlsSetValue`）进行显式管理。
 
 ---
 
-## 8. 旗舰级重型应用测试与实战验证
+## 8. 框架当前局限性与后续攻坚方向
 
-为验证 MemLLVM 对极端复杂工业级 C/C++ 项目的编译承载能力，项目提供了 5 个高难度测试示例，全部成功编译并运行为 **单文件纯内存扁平二进制（.bin）**：
+MemLLVM 致力于在纯内存扁平二进制中提供尽可能强大的现代化 C/C++ 开发能力。但由于完全脱离了 Windows 操作系统的原生 PE 加载管线，以下机制目前受限于体系结构而无法直接处理：
+
+1. **C++ 异常处理 (`try` / `catch` / `throw`)**：
+   - Windows x64 异常展开（Stack Unwinding）严格依赖 PE 文件在构建时生成的 `.pdata` 和 `.xdata` 异常展开表，并由系统内核登记管理。纯内存执行的裸二进制在没有向 NT 内核注册函数表时，抛出异常会导致内核无法定位展开处理器而直接崩溃。
+   - **当前要求**：工程必须显式禁用 C++ 异常与 RTTI（`/EHs-c-`、`/GR-`、`/clang:-fno-exceptions`）。
+   - **后续攻坚方案**：团队正在攻坚基于微型运行时自举注册（通过自省代码段范围并在入口自注册 `RtlAddFunctionTable`）的技术方案，计划在后续版本恢复对异常安全展开的完整支持。
+2. **Windows PE 资源嵌入（.rsrc / RC 资源）**：
+   - 纯内存扁平二进制没有标准的 PE 头部与数据目录表，因此通过 Visual Studio 资源编译器（`.rc`）打包的窗口图标（RT_ICON）、对话框模板、版本信息（VS_VERSION_INFO）等，无法通过传统 `FindResource` / `LoadIcon` 获取。
+   - **当前要求**：所有静态资源（图像、着色器字节码、字体、音频数据包）需以内嵌字节数组（如内嵌十六进制数组、或伴生数据流如 `doom1.wad`）方式集成。
+   - **后续攻坚方案**：正在研发纯内存虚拟资源包拦截与伪 `HMODULE` 重定向技术。
+3. **原生 C++ `thread_local` 关键字**：
+   - 如第 7 节所述，脱离系统 PE 引导无法自动开辟 TLS Slot，目前请统一采用 `TlsAlloc` 系列 API 进行显式管理。
+
+---
+
+## 9. 旗舰级重型应用测试与实战验证
+
+为验证 MemLLVM 对极端复杂工业级 C/C++ 项目的编译承载能力，项目提供了 4 个高难度测试示例，全部成功编译并运行为 **单文件纯内存扁平二进制（.bin）**：
 
 | 测试项目 | 语言与规模 | 产物大小 | 验证技术点 |
 | :--- | :--- | :--- | :--- |
@@ -492,147 +470,67 @@ MemLLVM 内部集成超高效率的运行时 API 动态查找引擎：
 | **CHIP-8 虚拟机** | C++20 现代特性 | **42 KB** | 虚拟 CPU 指令解码循环（Opcode Dispatch）、35 条机器指令仿真、定时器中断、单色点阵显存渲染，流畅运行《Pong》与《俄罗斯方块》。 |
 | **经典 DOOM 引擎** | 纯 C 语言 (83 个源文件) | **703 KB** | id Software 经典 DOOM（doomgeneric），纯内存 3D 软件光栅化渲染、实时键盘交互控制、音频合成器、IWAD 数据包连续流式读取。 |
 | **Dear ImGui (v1.91+)** | C++17 工业级 UI | **1.70 MB** | 现代化即时模式图形界面、DirectX 11 硬件加速渲染管线、控件停靠（Docking）、色彩选择器、实时性能图表。 |
-| **Scintilla 代码编辑器** | C++20 重型项目 | **980 KB** | Scintilla 原生文本渲染引擎、Direct2D / DirectWrite 矢量字体排版、多级撤销重做栈、行号标记栏、光标呼吸引擎。 |
 
 ---
 
-## 9. 快速上手与编译指南
+## 10. 极简上手与 Visual Studio 原生项目（.vcxproj）对接指南
 
-### 编译环境要求
-* 操作系统：Windows 10 / 11 x64
-* 编译器：Visual Studio 2022 (MSVC v143+)
-* LLVM 工具链：LLVM / Clang 18+ (包含 `clang-cl.exe`、`lld-link.exe`)
-* 脚本环境：Python 3.10+（需安装 `pefile`：`pip install pefile`）
+使用 MemLLVM 的最简方案是直接下载 GitHub Release 提供的预打包 SDK，并通过环境变量无痛融入工程，无需在项目中写死任何机器绝对路径。
 
-### 1. 编译 MemLLVM 编译器插件
-```powershell
-git clone https://github.com/Laster-dev/MemLLVM.git
-cd MemLLVM
-cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DLLVM_DIR="<path_to_llvm>/lib/cmake/llvm"
-cmake --build build --config Release --target MemLLVM
-```
+### 第一步：下载并配置 SDK 环境变量
+1. 前往 [MemLLVM GitHub Releases](https://github.com/Laster-dev/MemLLVM/releases) 下载最新的 `MemLLVM-SDK-windows-x64.zip`。
+2. 解压到本地任意目录（例如 `C:\MemLLVM`）。
+3. 添加系统或用户环境变量 `MEMLLVM_DIR` 指向解压目录：
+   ```powershell
+   [System.Environment]::SetEnvironmentVariable("MEMLLVM_DIR", "C:\MemLLVM", "User")
+   ```
+   *（可选）将 `%MEMLLVM_DIR%\bin` 添加至系统的 `PATH` 环境变量中。*
 
-### 2. 编译 LTL 核心运行时库
-```powershell
-cmd /c ltl\build_ltl.bat
-```
+### 第二步：原生 Visual Studio 项目（.vcxproj）对接配置
+在 Visual Studio 中打开已有或新建的 C++ 项目，右键打开 **项目属性**：
 
-### 3. 编译纯内存二进制加载测试器
-```powershell
-clang-cl /O2 /Fe:tests\run_bin.exe tests\run_bin.c
-```
+1. **常规** -> **平台工具集**：选择 **LLVM (clang-cl)**。
+2. **C/C++** -> **常规** -> **附加包含目录**：添加
+   ```text
+   $(MEMLLVM_DIR)\include;$(MEMLLVM_DIR)\ltl\include;%(AdditionalIncludeDirectories)
+   ```
+3. **C/C++** -> **代码生成**：
+   - **启用 C++ 异常**：选择 **否** (`/EHs-c- /GR-`)。
+   - **安全检查**：选择 **禁用安全检查 (/GS-)**。
+4. **C/C++** -> **命令行** -> **其他选项**：直接添加
+   ```text
+   /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll" /clang:-fno-jump-tables /clang:-mno-stack-arg-probe /clang:-fno-builtin
+   ```
+5. **链接器** -> **常规** -> **附加库目录**：添加
+   ```text
+   $(MEMLLVM_DIR)\ltl;$(MEMLLVM_DIR)\lib;%(AdditionalLibraryDirectories)
+   ```
+6. **链接器** -> **输入**：
+   - **忽略所有默认库**：选择 **是 (/NODEFAULTLIB)**。
+   - **附加依赖项**：添加 `ltl.lib;` 以及项目需要的 Win32 系统库（如 `kernel32.lib;user32.lib;gdi32.lib;d3d11.lib`）。
+7. **链接器** -> **高级** -> **入口点**：填入 `main`。
+8. **生成事件** -> **生成后事件** -> **命令行**：
+   ```bat
+   python "$(MEMLLVM_DIR)\examples\imgui\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
+   ```
 
-### 4. 一键批量编译所有展示示例
-```powershell
-python examples\build_all.py
-```
-
-### 5. 在内存中直接运行生成的扁平二进制
-```powershell
-# 运行 Box2D 刚体物理动力学引擎
-.\tests\run_bin.exe .\examples\box2d\box2d.bin
-
-# 运行 CHIP-8 虚拟机与游戏
-.\tests\run_bin.exe .\examples\chip8\chip8.bin
-
-# 运行 经典 DOOM
-.\tests\run_bin.exe .\examples\doom\doom.bin
-
-# 运行 Dear ImGui DirectX 11 演示界面
-.\tests\run_bin.exe .\examples\imgui\imgui_demo.bin
-
-# 运行 Scintilla 现代化代码编辑器
-.\tests\run_bin.exe .\examples\scintilla_editor\scintilla_editor.bin
-```
+编译完成后，会在输出目录自动生成绝对位置无关的 `.bin` 文件。您可以使用 SDK 自带的现代化图形执行器 `$(MEMLLVM_DIR)\Tools\SCLoader.exe` 打开此 `.bin` 进行载入、执行与调试。
 
 ---
 
-## 10. Visual Studio 深度集成与项目对接指南
+## 11. 致敬与鸣谢（VC-LTL）
 
-MemLLVM 能够完美融入 Microsoft Visual Studio 2022 / 2019 IDE 开发工作流。您可以直接在 Visual Studio 内编写现代化 C/C++ 业务逻辑，利用 IDE 强大的智能感知（IntelliSense）与代码高亮，并通过一键点击（或按下 `F5`）自动触发编译、Pass 插件变换、扁平二进制提取以及在内存沙盒中拉起运行与断点调试。
-
-### 方案 A：原生 Visual Studio 项目（.vcxproj）对接
-
-1. **环境变量与平台工具集准备**：
-   - 打开 Visual Studio Installer，确认已勾选安装 **适用于 Windows 的 C++ Clang 编译器** 以及 **LLVM 工具集 MSBuild 支持**。
-   - 配置系统环境变量 `LLVM_PATH`，指向您的 LLVM 安装根目录（例如 `C:\LLVM-22-dev`）：
-     ```powershell
-     [System.Environment]::SetEnvironmentVariable("LLVM_PATH", "C:\LLVM-22-dev", "User")
-     ```
-   - 在解决方案资源管理器中右键点击工程 -> **属性** -> **配置属性** -> **常规** -> **平台工具集**：选择 **LLVM (clang-cl)**。
-
-2. **C/C++ 编译器属性配置**：
-   - **配置属性** -> **C/C++** -> **常规**：
-     - **附加包含目录**：添加 `$(SolutionDir)ltl\include`（或 MemLLVM 的 `ltl\include` 路径）。
-   - **配置属性** -> **C/C++** -> **代码生成**：
-     - **启用 C++ 异常**：选择 **否** (`/EHs-c- /GR-`)。
-     - **安全检查**：选择 **禁用安全检查 (/GS-)**。
-   - **配置属性** -> **C/C++** -> **命令行**：
-     - 在 **其他选项** 中填入以下参数：
-       ```text
-       /clang:-fpass-plugin="<PathToMemLLVM>\build\MemLLVM\Release\MemLLVM.dll" /clang:-fno-jump-tables /clang:-mno-stack-arg-probe /clang:-fno-builtin
-       ```
-
-3. **链接器配置（纯净无依赖）**：
-   - **配置属性** -> **链接器** -> **输入**：
-     - **忽略所有默认库**：选择 **是 (/NODEFAULTLIB)**。
-     - **附加依赖项**：添加 `<PathToMemLLVM>\ltl\ltl.lib` 以及项目所需的 Win32 导入库（如 `kernel32.lib;user32.lib;gdi32.lib;d3d11.lib` 等）。
-   - **配置属性** -> **链接器** -> **高级**：
-     - **入口点**：填入 `main`。
-
-4. **配置生成后事件自动提取 `.bin` 镜像**：
-   - **配置属性** -> **生成事件** -> **生成后事件**：
-     - **命令行**：
-       ```bat
-       python "<PathToMemLLVM>\examples\imgui\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
-       ```
-     - **说明**：`正在将 PE 二进制提取并封装为自包含绝对位置无关纯内存镜像 (.bin)...`
-
-5. **配置 F5 一键启动与内存沙盒调试**：
-   - **配置属性** -> **调试**：
-     - **命令**：`<PathToMemLLVM>\tests\run_bin.exe`
-     - **命令参数**：`"$(TargetDir)$(TargetName).bin"`
-     - **工作目录**：`$(TargetDir)`
-   - 配置完成后，直接按下 **F5** 或 **Ctrl+F5**，Visual Studio 将自动调用 `clang-cl` 挂载 `MemLLVM.dll`，完成编译与自重定位链接，提取 `.bin`，并由 `run_bin.exe` 在模拟内存中直接执行！
+特别致敬并诚挚感谢 **[VC-LTL](https://github.com/Chuyu-Team/VC-LTL5)** 项目及其作者团队（Chuyu-Team）！  
+VC-LTL 在 Windows 轻量化 CRT、独立无依赖运行库、精简运行时体积领域开创了极其卓越的技术典范。MemLLVM 的自由运行时（Freestanding LTL）体系理念深受 VC-LTL 的启发与赋能，特此致以崇高的敬意与感谢！
 
 ---
 
-### 方案 B：CMake 工程对接（Visual Studio “打开文件夹”模式）
+## 12. Star 历史趋势
 
-如果您在 Visual Studio 中使用 CMake 作为工程组织形式：
-1. 在 `CMakeLists.txt` 或 `CMakePresets.json` 中绑定 `clang-cl`：
-   ```cmake
-   set(CMAKE_C_COMPILER "$ENV{LLVM_PATH}/bin/clang-cl.exe")
-   set(CMAKE_CXX_COMPILER "$ENV{LLVM_PATH}/bin/clang-cl.exe")
-   ```
-2. 注入 MemLLVM 核心编译选项：
-   ```cmake
-   add_compile_options(
-       $<$<COMPILE_LANGUAGE:C,CXX>:
-           /clang:-fpass-plugin=${MEMLLVM_DIR}/build/MemLLVM/Release/MemLLVM.dll
-           /GS-
-           /GR-
-           /clang:-fno-jump-tables
-           /clang:-mno-stack-arg-probe
-           /clang:-fno-builtin
-       >
-   )
-   ```
-3. 剥离 CRT 依赖并配置自动化生成 `.bin`：
-   ```cmake
-   target_link_options(my_app PRIVATE /NODEFAULTLIB /ENTRY:main)
-   target_link_libraries(my_app PRIVATE ${MEMLLVM_DIR}/ltl/ltl.lib)
-
-   add_custom_command(TARGET my_app POST_BUILD
-       COMMAND python ${MEMLLVM_DIR}/examples/imgui/extract_flat_bin.py
-               $<TARGET_FILE:my_app>
-               $<TARGET_FILE_DIR:my_app>/$<TARGET_FILE_BASE_NAME:my_app>.bin
-       COMMENT "Generating position-independent flat binary..."
-   )
-   ```
+[![Star History Chart](https://api.star-history.com/svg?repos=Laster-dev/MemLLVM&type=Date)](https://star-history.com/#Laster-dev/MemLLVM&Date)
 
 ---
 
 ## 📄 License / 开源许可协议
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](LICENSE).  
 本项目遵循 MIT 开源许可协议。

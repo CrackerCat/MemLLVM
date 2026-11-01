@@ -49,7 +49,7 @@ Function *findOrSynthesizeEntryPoint(Module &M) {
     BasicBlock *BB = BasicBlock::Create(Ctx, "entry", MainFn);
     IRBuilder<> B(BB);
 
-    // In flat binary / raw shellcode execution, resources cannot be loaded from the shellcode host runner (e.g. run_bin.exe).
+    // In flat binary / raw machine code execution, resources cannot be loaded from the host process.
     // Instead, probe and load companion resource DLL matching module name (e.g. Notepad4.dll).
     StringRef SrcFile = M.getSourceFileName();
     size_t DotPos = SrcFile.rfind('.');

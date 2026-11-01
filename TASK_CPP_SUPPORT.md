@@ -87,7 +87,7 @@ flowchart TD
         return v[0] + v[1]; // 期望返回 300
     }
     ```
-  - 验证编译、链接与 `run_bin.exe` 执行无报错。
+  - 验证编译、链接与 `SCLoader` 执行无报错。
 
 ---
 

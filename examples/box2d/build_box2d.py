@@ -119,26 +119,26 @@ def build_stub(stub_offset, orig_base, entry_offset, num_relocs, reloc_table_off
     # sub rdx, (stub_offset + pop_rdx_off) -> RDX = current_base
     code.extend(b'\x48\x81\xEA' + struct.pack('<I', stub_offset + pop_rdx_off))
     
-    # 2. Delta = current_base - orig_base
+    # 2. Delta = current_base - orig_base (r8 = Delta)
     code.extend(b'\x48\xB8' + struct.pack('<Q', orig_base)) # mov rax, orig_base
-    code.extend(b'\x48\x89\xD3')                             # mov rbx, rdx
-    code.extend(b'\x48\x29\xC3')                             # sub rbx, rax (rbx = Delta)
+    code.extend(b'\x49\x89\xD0')                             # mov r8, rdx
+    code.extend(b'\x49\x29\xC0')                             # sub r8, rax (r8 = Delta)
     
     # 3. jz skip_rebase
     jz_idx = len(code)
     code.extend(b'\x74\x00')
     
-    # 4. lea rsi, [rdx + reloc_table_offset]; mov ecx, num_relocs
+    # 4. lea r9, [rdx + reloc_table_offset]; mov r10d, num_relocs
     if num_relocs > 0:
-        code.extend(b'\x48\x8D\xB2' + struct.pack('<I', reloc_table_offset))
-        code.extend(b'\xB9' + struct.pack('<I', num_relocs))
+        code.extend(b'\x4C\x8D\x8A' + struct.pack('<I', reloc_table_offset))
+        code.extend(b'\x41\xBA' + struct.pack('<I', num_relocs))
         
         # Rebase loop
         loop_start = len(code)
-        code.extend(b'\x8B\x06')         # mov eax, dword ptr [rsi]
-        code.extend(b'\x48\x01\x1C\x02') # add qword ptr [rdx + rax], rbx
-        code.extend(b'\x48\x83\xC6\x04') # add rsi, 4
-        code.extend(b'\xFF\xC9')         # dec ecx
+        code.extend(b'\x41\x8B\x01')         # mov eax, dword ptr [r9]
+        code.extend(b'\x4C\x01\x04\x02')     # add qword ptr [rdx + rax], r8
+        code.extend(b'\x49\x83\xC1\x04')     # add r9, 4
+        code.extend(b'\x41\xFF\xCA')         # dec r10d
         loop_disp = loop_start - (len(code) + 2)
         code.extend(b'\x75' + struct.pack('b', loop_disp))
     

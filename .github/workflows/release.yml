@@ -27,13 +27,12 @@ jobs:
         run: |
           $artifacts = @(
             "release_artifacts/MemLLVM.dll",
-            "release_artifacts/run_bin.exe",
             "release_artifacts/box2d.bin",
             "release_artifacts/chip8.bin",
             "release_artifacts/doom.bin",
             "release_artifacts/doom1.wad",
             "release_artifacts/imgui_demo.bin",
-            "release_artifacts/scintilla_editor.bin"
+            "Tools/SCLoader.exe"
           )
           Write-Host "=========================================================="
           Write-Host "       MemLLVM Release Artifacts Verification Matrix       "
@@ -50,10 +49,50 @@ jobs:
             }
           }
           if (-not $allValid) {
-            throw "One or more required release artifacts are missing from release_artifacts/!"
+            throw "One or more required release artifacts are missing!"
           }
           Write-Host "=========================================================="
-          Write-Host "[+] All 8 release artifacts verified successfully."
+          Write-Host "[+] All release artifacts verified successfully."
+
+      - name: Package SDK Distribution Archive
+        shell: pwsh
+        run: |
+          $sdk = "MemLLVM-SDK"
+          if (Test-Path $sdk) { Remove-Item -Recurse -Force $sdk }
+          New-Item -ItemType Directory -Path "$sdk/bin" -Force
+          New-Item -ItemType Directory -Path "$sdk/lib" -Force
+          New-Item -ItemType Directory -Path "$sdk/include" -Force
+          New-Item -ItemType Directory -Path "$sdk/ltl" -Force
+          New-Item -ItemType Directory -Path "$sdk/Tools" -Force
+          New-Item -ItemType Directory -Path "$sdk/src" -Force
+          New-Item -ItemType Directory -Path "$sdk/examples" -Force
+
+          # 1. bin & lib
+          Copy-Item "release_artifacts/MemLLVM.dll" "$sdk/bin/" -Force
+          if (Test-Path "build/MemLLVM/Release/MemLLVM.lib") {
+            Copy-Item "build/MemLLVM/Release/MemLLVM.lib" "$sdk/lib/" -Force
+          }
+
+          # 2. include
+          Copy-Item "MemLLVM/*.h" "$sdk/include/" -Force
+
+          # 3. LTL runtime
+          Copy-Item -Recurse "ltl/*" "$sdk/ltl/" -Force
+
+          # 4. Tools (SCLoader GUI runner)
+          Copy-Item "Tools/SCLoader.exe" "$sdk/Tools/" -Force
+
+          # 5. Full Source Code
+          Copy-Item -Recurse "MemLLVM/*" "$sdk/src/" -Force
+          Copy-Item "CMakeLists.txt" "$sdk/" -Force
+          Copy-Item "readme.md" "$sdk/" -Force
+
+          # 6. Examples
+          Copy-Item -Recurse "examples/*" "$sdk/examples/" -Force
+
+          # 7. Compress into SDK zip package
+          Compress-Archive -Path "$sdk/*" -DestinationPath "MemLLVM-SDK-windows-x64.zip" -Force
+          Write-Host "[+] Created MemLLVM-SDK-windows-x64.zip ($((Get-Item 'MemLLVM-SDK-windows-x64.zip').Length / 1024.0) KB)"
 
       - name: Generate Release Tag & Date
         id: release_info
@@ -68,34 +107,39 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_info.outputs.tag }}
-          name: "MemLLVM Automated Release ${{ steps.release_info.outputs.date }}"
+          name: "MemLLVM Official Release ${{ steps.release_info.outputs.date }}"
           draft: false
           prerelease: false
           generate_release_notes: true
           make_latest: true
           body: |
-            ## MemLLVM Official Binary Release
+            ## MemLLVM Official Release (Full SDK & Binaries)
 
             Compiled with **LLVM/Clang New Pass Manager** and **LTL Freestanding Runtime**.
-            All application targets are standalone, self-relocating flat machine code images (.bin) runnable in memory via `run_bin.exe`.
+            All application targets are standalone, self-relocating flat machine code images (.bin) runnable in memory.
 
             ### Release Assets:
-            - **`MemLLVM.dll`**: LLVM Compiler Pass Plugin (Windows x64)
-            - **`run_bin.exe`**: In-Memory Flat Machine Code Loader & Harness
+            - **`MemLLVM-SDK-windows-x64.zip`**: Complete SDK archive containing:
+              - `bin/`: `MemLLVM.dll` LLVM Pass Plugin
+              - `lib/`: `MemLLVM.lib` import library
+              - `include/`: Pass headers & API definitions
+              - `ltl/`: Freestanding C/C++ runtime headers and `ltl.lib`
+              - `Tools/`: `SCLoader.exe` interactive GUI payload runner & debugger
+              - `src/`: Complete C++ source code of all LLVM passes
+              - `examples/`: Box2D, CHIP-8, DOOM, ImGui full example projects
+            - **`Tools/SCLoader.exe`**: Modern CUI-based GUI Shellcode & Payload Loader
             - **`box2d.bin`**: Erin Catto's Box2D 2D Rigid Body Physics Engine Flat Binary
             - **`chip8.bin`**: Full CHIP-8 CPU / Sound Virtual Machine Flat Binary
             - **`doom.bin`**: Classic DOOM Game Engine Flat Binary
             - **`doom1.wad`**: DOOM Shareware Game Data IWAD
             - **`imgui_demo.bin`**: Dear ImGui DirectX 11 Immediate-Mode GUI Flat Binary
-            - **`scintilla_editor.bin`**: Scintilla Native Win32 Code Editor Flat Binary
           files: |
-            release_artifacts/MemLLVM.dll
-            release_artifacts/run_bin.exe
+            MemLLVM-SDK-windows-x64.zip
+            Tools/SCLoader.exe
             release_artifacts/box2d.bin
             release_artifacts/chip8.bin
             release_artifacts/doom.bin
             release_artifacts/doom1.wad
             release_artifacts/imgui_demo.bin
-            release_artifacts/scintilla_editor.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

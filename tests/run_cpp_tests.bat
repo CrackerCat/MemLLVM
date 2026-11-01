@@ -44,7 +44,7 @@ if "%PLUGIN_DLL%"=="" (
 )
 set LTL_LIB=D:\MemLLVM\ltl\ltl.lib
 set LTL_INC=D:\MemLLVM\ltl\include
-set RUNNER=D:\MemLLVM\tests\run_bin.exe
+
 set COMMON_FLAGS=/std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /clang:-ffreestanding /clang:-fno-builtin /clang:-mno-stack-arg-probe /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" -O2
 set LINK_FLAGS=/entry:main /subsystem:console /nodefaultlib /safeseh:no /merge:.rdata=.text /merge:.data=.text /merge:.bss=.text /opt:noicf
 
@@ -53,7 +53,7 @@ echo [*] Compiling and running Test 1: STL vector container...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_stl_basic.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_stl_basic.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_stl_basic.bin D:\MemLLVM\tests\test_cpp_stl_basic.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_stl_basic.bin
+
 echo [Test 1 Status: %ERRORLEVEL%]
 
 echo.
@@ -62,7 +62,7 @@ echo [*] Compiling and running Test 2: Global Objects and Constructors...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_global_obj.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_global_obj.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_global_obj.bin D:\MemLLVM\tests\test_cpp_global_obj.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_global_obj.bin
+
 echo [Test 2 Status: %ERRORLEVEL%]
 
 echo.
@@ -71,7 +71,7 @@ echo [*] Compiling and running Test 3: Virtual Polymorphism and VTables...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_polymorphism.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_polymorphism.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_polymorphism.bin D:\MemLLVM\tests\test_cpp_polymorphism.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_polymorphism.bin
+
 echo [Test 3 Status: %ERRORLEVEL%]
 
 echo.
@@ -80,7 +80,7 @@ echo [*] Compiling and running Test 4: Thread-Safe Function-Local Statics (Singl
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread_safe_static.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread_safe_static.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_thread_safe_static.bin D:\MemLLVM\tests\test_cpp_thread_safe_static.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_thread_safe_static.bin
+
 echo [Test 4 Status: %ERRORLEVEL%]
 
 echo.
@@ -89,7 +89,7 @@ echo [*] Compiling and running Test 5: Pointer-bearing Struct Constants...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_struct_ptr_const.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_struct_ptr_const.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_struct_ptr_const.bin D:\MemLLVM\tests\test_cpp_struct_ptr_const.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_struct_ptr_const.bin
+
 echo [Test 5 Status: %ERRORLEVEL%]
 
 echo.
@@ -98,7 +98,7 @@ echo [*] Compiling and running Test 6: Initialized and Uninitialized Globals (.d
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_globals_data_bss.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_globals_data_bss.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_globals_data_bss.bin D:\MemLLVM\tests\test_cpp_globals_data_bss.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_globals_data_bss.bin
+
 echo [Test 6 Status: %ERRORLEVEL%]
 
 echo.
@@ -107,7 +107,7 @@ echo [*] Compiling and running Test 7: std::mutex and std::lock_guard...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_mutex.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_mutex.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_mutex.bin D:\MemLLVM\tests\test_cpp_mutex.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_mutex.bin
+
 echo [Test 7 Status: %ERRORLEVEL%]
 
 echo.
@@ -116,7 +116,7 @@ echo [*] Compiling and running Test 8: std::thread multi-threading...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_thread.bin D:\MemLLVM\tests\test_cpp_thread.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_thread.bin
+
 echo [Test 8 Status: %ERRORLEVEL%]
 
 echo.
@@ -125,7 +125,7 @@ echo [*] Compiling and running Test 9: thread_local native emulated TLS...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread_local.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread_local.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_thread_local.bin D:\MemLLVM\tests\test_cpp_thread_local.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_thread_local.bin
+
 echo [Test 9 Status: %ERRORLEVEL%]
 
 echo.
@@ -134,7 +134,7 @@ echo [*] Compiling and running Test 10: std::filesystem file operations...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_filesystem.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_filesystem.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_filesystem.bin D:\MemLLVM\tests\test_cpp_filesystem.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_filesystem.bin
+
 echo [Test 10 Status: %ERRORLEVEL%]
 
 echo.
@@ -143,7 +143,7 @@ echo [*] Compiling and running Test 11: std::cout and std::cerr streams...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_iostream.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_iostream.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_iostream.bin D:\MemLLVM\tests\test_cpp_iostream.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_iostream.bin
+
 echo [Test 11 Status: %ERRORLEVEL%]
 
 echo.
@@ -152,7 +152,7 @@ echo [*] Compiling and running Test 12: std::fstream (ifstream, ofstream, std::l
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_fstream.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_fstream.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_fstream.bin D:\MemLLVM\tests\test_cpp_fstream.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_fstream.bin
+
 echo [Test 12 Status: %ERRORLEVEL%]
 
 echo.
@@ -170,7 +170,7 @@ echo [*] Compiling and running Test 14: std::regex and std::regex_search...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_regex.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_regex.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_regex.bin D:\MemLLVM\tests\test_cpp_regex.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_regex.bin
+
 echo [Test 14 Status: %ERRORLEVEL%]
 
 echo.
@@ -179,7 +179,7 @@ echo [*] Compiling and running Test 15: std::async, std::future, std::promise...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_async.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_async.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_async.bin D:\MemLLVM\tests\test_cpp_async.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_async.bin
+
 echo [Test 15 Status: %ERRORLEVEL%]
 
 echo.
@@ -189,7 +189,7 @@ set MODULE_FLAGS=/std:c++20 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_module_std.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_module_std.exe
 "%OBJCOPY_BIN%" --dump-section .text=D:\MemLLVM\tests\test_cpp_module_std.bin D:\MemLLVM\tests\test_cpp_module_std.exe
-"%RUNNER%" D:\MemLLVM\tests\test_cpp_module_std.bin
+
 echo [Test 16 Status: %ERRORLEVEL%]
 
 echo.

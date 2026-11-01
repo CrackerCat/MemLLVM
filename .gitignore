@@ -47,9 +47,12 @@ CMakeUserPresets.json
 *.bin
 *.manifest
 
-# Allow release artifacts directory to be tracked
+# Allow release artifacts and Tools directory to be tracked
 !release_artifacts/
 !release_artifacts/**
+!Tools/
+!Tools/**
+!Tools/*.exe
 
 # Debugging and symbol files
 *.pdb
