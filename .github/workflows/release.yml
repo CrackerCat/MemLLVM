@@ -1,0 +1,140 @@
+name: Automated Release Build
+
+on:
+  push:
+    branches: [ "**" ]
+    tags: [ "**" ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release Flat Binaries
+    if: |
+      contains(github.event.head_commit.message, 'release') ||
+      contains(github.event.head_commit.message, 'Release') ||
+      contains(github.ref, 'release') ||
+      contains(github.ref, 'Release')
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python Dependencies
+        shell: pwsh
+        run: |
+          pip install --upgrade pip
+          pip install pefile
+
+      - name: Setup MSVC Environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install LLVM & Clang Toolchain
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "18.1.8"
+
+      - name: Verify Toolchain
+        shell: pwsh
+        run: |
+          clang-cl --version
+          lld-link --version
+          cmake --version
+          echo "LLVM_PATH: $env:LLVM_PATH"
+
+      - name: Build MemLLVM Compiler Plugin (MemLLVM.dll)
+        shell: pwsh
+        run: |
+          $repoRoot = (Get-Item .).FullName
+          cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DLLVM_DIR="$env:LLVM_PATH/lib/cmake/llvm"
+          cmake --build build --config Release --target MemLLVM
+          if (!(Test-Path "build\MemLLVM\Release\MemLLVM.dll")) {
+            throw "MemLLVM.dll was not generated in build\MemLLVM\Release\!"
+          }
+          Write-Host "[+] MemLLVM.dll built successfully."
+
+      - name: Build run_bin.exe Test Harness
+        shell: pwsh
+        run: |
+          clang-cl /O2 /Fe:tests\run_bin.exe tests\run_bin.c
+          if (!(Test-Path "tests\run_bin.exe")) {
+            throw "tests\run_bin.exe failed to compile!"
+          }
+          Write-Host "[+] run_bin.exe built successfully."
+
+      - name: Build LTL Runtime Library (ltl.lib)
+        shell: pwsh
+        run: |
+          $repoRoot = (Get-Item .).FullName
+          $env:CLANG_BIN = "$env:LLVM_PATH\bin\clang-cl.exe"
+          $env:LIB_BIN = "$env:LLVM_PATH\bin\llvm-lib.exe"
+          $env:PLUGIN_DLL = "$repoRoot\build\MemLLVM\Release\MemLLVM.dll"
+          cmd /c ltl\build_ltl.bat
+          if (!(Test-Path "ltl\ltl.lib")) {
+            throw "ltl\ltl.lib was not generated!"
+          }
+          Write-Host "[+] ltl.lib built successfully."
+
+      - name: Build All Showcase Examples (examples/build_all.py)
+        shell: pwsh
+        run: |
+          $repoRoot = (Get-Item .).FullName
+          $env:CLANG_CL = "$env:LLVM_PATH\bin\clang-cl.exe"
+          $env:LLD_LINK = "$env:LLVM_PATH\bin\lld-link.exe"
+          $env:PLUGIN_DLL = "$repoRoot\build\MemLLVM\Release\MemLLVM.dll"
+          python examples\build_all.py
+
+      - name: Generate Release Tag & Date
+        id: release_info
+        shell: pwsh
+        run: |
+          $dateTag = Get-Date -Format "yyyy.MM.dd"
+          $tag = "v${dateTag}"
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          echo "date=$dateTag" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_info.outputs.tag }}
+          name: "MemLLVM Automated Release ${{ steps.release_info.outputs.date }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## MemLLVM Automated Release Binary Artifacts
+
+            Compiled with **LLVM/Clang New Pass Manager** and **LTL Runtime**.
+            All example binaries are flat position-independent virtual machine images (.bin) runnable directly in memory via `run_bin.exe`.
+
+            ### Release Assets:
+            - `MemLLVM.dll`: LLVM Compiler Pass Plugin
+            - `run_bin.exe`: Flat Machine Code In-Memory Loader & Verification Harness
+            - `box2d.bin`: Erin Catto's Box2D 2D Physics Engine Flat Binary
+            - `chip8.bin`: Full CHIP-8 CPU / Sound Virtual Machine Flat Binary
+            - `doom.bin`: Classic DOOM Game Engine Flat Binary
+            - `doom1.wad`: DOOM Shareware Game Data IWAD
+            - `imgui_demo.bin`: Dear ImGui DirectX 11 Flat Binary
+            - `scintilla_editor.bin`: Scintilla Native Win32 Code Editor Flat Binary
+          files: |
+            build/MemLLVM/Release/MemLLVM.dll
+            tests/run_bin.exe
+            examples/box2d/box2d.bin
+            examples/chip8/chip8.bin
+            examples/doom/doom.bin
+            examples/doom/doom1.wad
+            examples/imgui/imgui_demo.bin
+            examples/scintilla_editor/scintilla_editor.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

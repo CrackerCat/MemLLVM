@@ -49,8 +49,27 @@ Function *findOrSynthesizeEntryPoint(Module &M) {
     BasicBlock *BB = BasicBlock::Create(Ctx, "entry", MainFn);
     IRBuilder<> B(BB);
 
+    // In flat binary / raw shellcode execution, resources cannot be loaded from the shellcode host runner (e.g. run_bin.exe).
+    // Instead, probe and load companion resource DLL matching module name (e.g. Notepad4.dll).
+    StringRef SrcFile = M.getSourceFileName();
+    size_t DotPos = SrcFile.rfind('.');
+    size_t SlashPos = SrcFile.find_last_of("/\\");
+    size_t StartPos = (SlashPos == StringRef::npos) ? 0 : SlashPos + 1;
+    std::string BaseName = (DotPos != StringRef::npos && DotPos > StartPos)
+                               ? SrcFile.substr(StartPos, DotPos - StartPos).str()
+                               : "resources";
+    std::string DllName = BaseName + ".dll";
+
+    FunctionCallee LoadLib = M.getOrInsertFunction("LoadLibraryA", FunctionType::get(PtrTy, {PtrTy}, false));
+    Constant *DllStr = ConstantDataArray::getString(Ctx, DllName, true);
+    GlobalVariable *DllGV = new GlobalVariable(M, DllStr->getType(), true, GlobalValue::PrivateLinkage, DllStr, ".str.res_dll");
+    Value *ResMod = B.CreateCall(LoadLib, {B.CreatePointerCast(DllGV, PtrTy)});
+
     FunctionCallee GetMod = M.getOrInsertFunction("GetModuleHandleA", FunctionType::get(PtrTy, {PtrTy}, false));
-    Value *HInst = B.CreateCall(GetMod, {ConstantPointerNull::get(cast<PointerType>(PtrTy))});
+    Value *HostMod = B.CreateCall(GetMod, {ConstantPointerNull::get(cast<PointerType>(PtrTy))});
+
+    Value *HasResDll = B.CreateIsNotNull(ResMod);
+    Value *HInst = B.CreateSelect(HasResDll, ResMod, HostMod);
     Value *NullPtr = ConstantPointerNull::get(cast<PointerType>(PtrTy));
     Constant *EmptyStr = ConstantDataArray::getString(Ctx, "", true);
     GlobalVariable *EmptyGV = new GlobalVariable(M, EmptyStr->getType(), true, GlobalValue::PrivateLinkage, EmptyStr, ".str.empty_cmd");

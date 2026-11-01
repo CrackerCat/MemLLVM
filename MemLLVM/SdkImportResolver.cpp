@@ -188,10 +188,49 @@ public:
 
     return "";
   }
+
+  bool isApi(StringRef ApiName) {
+    if (ApiName.empty() || ApiName.starts_with("?") || ApiName.starts_with("llvm."))
+      return false;
+
+#ifdef _WIN32
+    static HMODULE hK32 = GetModuleHandleA("kernel32.dll");
+    static HMODULE hNt = GetModuleHandleA("ntdll.dll");
+    std::string s = ApiName.str();
+    if (hK32 && GetProcAddress(hK32, s.c_str())) return true;
+    if (hNt && GetProcAddress(hNt, s.c_str())) return true;
+#endif
+
+    init();
+    uint32_t h = calculateRor13(ApiName);
+    auto it = std::lower_bound(Entries.begin(), Entries.end(), h, [](const SdkApiEntry &e, uint32_t val) {
+      return e.hash < val;
+    });
+    if (it != Entries.end() && it->hash == h) {
+      return true;
+    }
+
+    auto dynIt = DynamicCache.find(ApiName.str());
+    if (dynIt != DynamicCache.end()) {
+      return true;
+    }
+
+    scanLocalLibsForApi(ApiName);
+    dynIt = DynamicCache.find(ApiName.str());
+    if (dynIt != DynamicCache.end()) {
+      return true;
+    }
+
+    return false;
+  }
 };
 
 std::string probeRequiredDllForApi(StringRef ApiName) {
   return SdkImportResolver::get().resolve(ApiName);
+}
+
+bool isKnownWindowsApi(StringRef ApiName) {
+  return SdkImportResolver::get().isApi(ApiName);
 }
 
 } // namespace memllvm

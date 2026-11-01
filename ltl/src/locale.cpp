@@ -115,6 +115,44 @@ int __cdecl _Wcscoll(const wchar_t* s1, const wchar_t* e1, const wchar_t* s2, co
     return (len1 < len2) ? -1 : (len1 > len2 ? 1 : 0);
 }
 
+size_t __cdecl _Wcsxfrm(wchar_t* s1, wchar_t* e1, const wchar_t* s2, const wchar_t* e2, const _Collvec*) noexcept {
+    size_t len2 = e2 - s2;
+    size_t maxlen = e1 - s1;
+    size_t copylen = len2 < maxlen ? len2 : maxlen;
+    for (size_t i = 0; i < copylen; ++i) s1[i] = s2[i];
+    return len2;
+}
+
+short __cdecl _Getwctype(wchar_t c, const _Ctypevec*) noexcept {
+    if (c < 256) {
+        _InitAsciiCtypeTable();
+        return (short)_g_ascii_ctype_table[(unsigned char)c];
+    }
+    return 0;
+}
+
+const wchar_t* __cdecl _Getwctypes(const wchar_t* first, const wchar_t* last, short* res, const _Ctypevec*) noexcept {
+    _InitAsciiCtypeTable();
+    for (; first != last; ++first, ++res) {
+        if (*first < 256) {
+            *res = (short)_g_ascii_ctype_table[(unsigned char)*first];
+        } else {
+            *res = 0;
+        }
+    }
+    return first;
+}
+
+wchar_t __cdecl _Towlower(wchar_t c, const _Ctypevec*) noexcept {
+    if (c >= L'A' && c <= L'Z') return c + (L'a' - L'A');
+    return c;
+}
+
+wchar_t __cdecl _Towupper(wchar_t c, const _Ctypevec*) noexcept {
+    if (c >= L'a' && c <= L'z') return c - (L'a' - L'A');
+    return c;
+}
+
 int __cdecl _Mbrtowc(wchar_t* pwc, const char* s, size_t n, mbstate_t*, const _Cvtvec*) noexcept {
     if (!s || n == 0) return 0;
     if (pwc) *pwc = (wchar_t)(unsigned char)*s;
@@ -179,8 +217,11 @@ void __cdecl _Facet_Register(_Facet_base*) {}
 int locale::id::_Id_cnt = 1;
 
 locale::id ctype<char>::id;
+locale::id ctype<wchar_t>::id;
 template<> locale::id collate<char>::id;
+template<> locale::id collate<wchar_t>::id;
 template<> locale::id codecvt<char, char, _Mbstatet>::id;
+locale::id codecvt<wchar_t, char, _Mbstatet>::id;
 
 // 4.1. Classic "C" Locale Implementation (_Locimp)
 static void* _g_locimp_vftable[4] = { 0 };

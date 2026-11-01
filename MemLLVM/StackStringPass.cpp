@@ -247,6 +247,11 @@ static bool transformGlobalString(GlobalVariable *GV, Module &M) {
 PreservedAnalyses StackStringPass::run(Module &M, ModuleAnalysisManager &MAM) {
   errs() << "[MemLLVM] Running StackStringPass on module: " << M.getName() << "\n";
 
+  if (getenv("MEMLLVM_DISABLE_STACK_STRINGS")) {
+    errs() << "[MemLLVM] StackStringPass skipped (MEMLLVM_DISABLE_STACK_STRINGS is set)\n";
+    return PreservedAnalyses::all();
+  }
+
   SmallVector<GlobalVariable *, 16> GlobalsToTransform;
   for (GlobalVariable &GV : M.globals()) {
     if (canTransformGlobalString(&GV)) {

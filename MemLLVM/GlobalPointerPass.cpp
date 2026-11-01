@@ -162,7 +162,10 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
     // Replace only pointer leaves with null, preserving all non-pointer fields (integers, enums, floats)
     Constant *CleanInit = replacePointerLeavesWithNull(GV->getInitializer());
     GV->setInitializer(CleanInit);
-    // Keep GV constness as-is so COMDAT section names (.rdata vs .data) remain consistent across TUs
+    // Mark non-constant so LLVM optimizer does not constant-fold loads from dynamic rebased slots to null,
+    // and prevent LLVM's ConstantMerge from collapsing distinct vtables sharing identical zero-initializers.
+    GV->setConstant(false);
+    GV->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
     if (GV->hasSection() && GV->getSection().starts_with(".text")) {
       GV->setSection("");
     }

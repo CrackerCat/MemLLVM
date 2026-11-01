@@ -6,5 +6,6 @@
 namespace memllvm {
 
 std::string probeRequiredDllForApi(llvm::StringRef ApiName);
+bool isKnownWindowsApi(llvm::StringRef ApiName);
 
 } // namespace memllvm

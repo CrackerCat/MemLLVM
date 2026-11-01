@@ -1,6 +1,7 @@
 #include "MemLLVM.h"
 #include "MemLLVMUtils.h"
 #include "ResolverBitcode.h"
+#include "SdkImportResolver.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -24,13 +25,17 @@ using namespace llvm;
 namespace memllvm {
 
 static bool isStaticShimSymbol(StringRef Name) {
+  // 1. Any MSVC C++ mangled symbol (?...) belongs to C++ modules / LTL / templates, NOT external Win32 DLL exports
+  if (Name.starts_with("?"))
+    return true;
+
+  // 2. Runtime shims, threading, memory, intrinsics, and CRT builtins provided statically by LTL
   if (Name.starts_with("_Mtx_") || Name.starts_with("_Cnd_") || 
       Name.starts_with("_Thrd_") || Name.starts_with("__emutls_") || 
-      Name.starts_with("__std_") ||
+      Name.starts_with("__std_") || Name.starts_with("__CxxFrameHandler") ||
+      Name.starts_with("__chkstk") ||
       Name.contains("@std@@") || Name.contains("@stdext@@") ||
       Name.contains("@Concurrency@@") ||
-      Name.starts_with("?cout@") || Name.starts_with("?cerr@") || Name.starts_with("?cin@") ||
-      Name.starts_with("?_Throw_Cpp_error@") ||
       Name.starts_with("_Smtx_") || Name == "_beginthreadex" ||
       Name.starts_with("MemLLVM_") || Name.starts_with("_MemLLVM_") ||
       Name == "_Getctype" || Name == "_Tolower" || Name == "_Toupper" ||
@@ -40,7 +45,14 @@ static bool isStaticShimSymbol(StringRef Name) {
       Name == "_get_stream_buffer_pointers" ||
       Name == "_lock_file" || Name == "_unlock_file" ||
       Name.contains("__ExceptionPtr") ||
-      Name == "memcpy" || Name == "memmove" || Name == "memset") {
+      Name == "memcpy" || Name == "memmove" || Name == "memset" ||
+      Name == "floor" || Name == "ceil" || Name == "round" ||
+      Name == "floorf" || Name == "ceilf" ||
+      Name == "strcmp" || Name == "strncmp" || Name == "_strnicmp" ||
+      Name == "_stricmp" || Name == "_wcsicmp" || Name == "wcsncmp" || Name == "_wcsnicmp" ||
+      Name == "qsort" || Name == "bsearch" ||
+      Name == "GetActiveProcessorCount" ||
+      Name == "_fltused") {
     return true;
   }
   return false;
@@ -65,7 +77,8 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
           if (Callee && Callee->isDeclaration() && !Callee->isIntrinsic() &&
               !Callee->getName().starts_with("llvm.") &&
               Callee->getName() != "MemLLVM_GetApiAddress" &&
-              !isStaticShimSymbol(Callee->getName())) {
+              !isStaticShimSymbol(Callee->getName()) &&
+              isKnownWindowsApi(Callee->getName())) {
             HasCallsToResolve = true;
             break;
           }
@@ -137,7 +150,8 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
           if (Callee && Callee->isDeclaration() && !Callee->isIntrinsic() &&
               !Callee->getName().starts_with("llvm.") &&
               Callee->getName() != "MemLLVM_GetApiAddress" &&
-              !isStaticShimSymbol(Callee->getName())) {
+              !isStaticShimSymbol(Callee->getName()) &&
+              isKnownWindowsApi(Callee->getName())) {
             CallsToResolve.push_back(CI);
           }
         }
@@ -201,6 +215,30 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     } else if (ApiName == "InitializeConditionVariable") {
       ApiHash = calculateRor13("RtlInitializeConditionVariable");
       errs() << "[MemLLVM] Note: Mapping forwarded API InitializeConditionVariable -> RtlInitializeConditionVariable\n";
+    } else if (ApiName == "SubmitThreadpoolWork") {
+      ApiHash = calculateRor13("TpPostWork");
+      errs() << "[MemLLVM] Note: Mapping forwarded API SubmitThreadpoolWork -> TpPostWork\n";
+    } else if (ApiName == "WaitForThreadpoolWorkCallbacks") {
+      ApiHash = calculateRor13("TpWaitForWork");
+      errs() << "[MemLLVM] Note: Mapping forwarded API WaitForThreadpoolWorkCallbacks -> TpWaitForWork\n";
+    } else if (ApiName == "CloseThreadpoolWork") {
+      ApiHash = calculateRor13("TpReleaseWork");
+      errs() << "[MemLLVM] Note: Mapping forwarded API CloseThreadpoolWork -> TpReleaseWork\n";
+    } else if (ApiName == "CloseThreadpool") {
+      ApiHash = calculateRor13("TpReleasePool");
+      errs() << "[MemLLVM] Note: Mapping forwarded API CloseThreadpool -> TpReleasePool\n";
+    } else if (ApiName == "CloseThreadpoolTimer") {
+      ApiHash = calculateRor13("TpReleaseTimer");
+      errs() << "[MemLLVM] Note: Mapping forwarded API CloseThreadpoolTimer -> TpReleaseTimer\n";
+    } else if (ApiName == "CloseThreadpoolWait") {
+      ApiHash = calculateRor13("TpReleaseWait");
+      errs() << "[MemLLVM] Note: Mapping forwarded API CloseThreadpoolWait -> TpReleaseWait\n";
+    } else if (ApiName == "SetThreadpoolTimer") {
+      ApiHash = calculateRor13("TpSetTimer");
+      errs() << "[MemLLVM] Note: Mapping forwarded API SetThreadpoolTimer -> TpSetTimer\n";
+    } else if (ApiName == "SetThreadpoolWait") {
+      ApiHash = calculateRor13("TpSetWait");
+      errs() << "[MemLLVM] Note: Mapping forwarded API SetThreadpoolWait -> TpSetWait\n";
     }
     ResolvedCallees.insert(Callee);
 
