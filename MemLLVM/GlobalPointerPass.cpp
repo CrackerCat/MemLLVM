@@ -162,14 +162,9 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
     // Replace only pointer leaves with null, preserving all non-pointer fields (integers, enums, floats)
     Constant *CleanInit = replacePointerLeavesWithNull(GV->getInitializer());
     GV->setInitializer(CleanInit);
-    GV->setConstant(false);
+    // Keep GV constness as-is so COMDAT section names (.rdata vs .data) remain consistent across TUs
     if (GV->hasSection() && GV->getSection().starts_with(".text")) {
       GV->setSection("");
-    }
-    if (GV->hasComdat()) GV->setComdat(nullptr);
-    if (GV->getLinkage() == GlobalValue::LinkOnceODRLinkage ||
-        GV->getLinkage() == GlobalValue::LinkOnceAnyLinkage) {
-      GV->setLinkage(GlobalValue::InternalLinkage);
     }
   }
 

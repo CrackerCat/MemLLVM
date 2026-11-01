@@ -74,6 +74,28 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
     }
   }
 
+  // Auto-initialize std::cout / std::cerr if referenced in entry module
+  if (EntryFn && !EntryFn->empty()) {
+    if (M.getGlobalVariable("?cout@std@@3V?$basic_ostream@DU?$char_traits@D@std@@@1@A") ||
+        M.getGlobalVariable("?cerr@std@@3V?$basic_ostream@DU?$char_traits@D@std@@@1@A")) {
+      LLVMContext &Ctx = M.getContext();
+      FunctionCallee InitCoutFn = M.getOrInsertFunction("MemLLVM_InitCout",
+          FunctionType::get(Type::getVoidTy(Ctx), false));
+      Instruction *InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
+      for (Instruction &I : EntryFn->getEntryBlock()) {
+        if (auto *CI = dyn_cast<CallInst>(&I)) {
+          if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "LoadLibraryA") {
+            InsertBefore = I.getNextNode();
+          }
+        }
+      }
+      IRBuilder<> Builder(InsertBefore);
+      Builder.CreateCall(InitCoutFn);
+      Changed = true;
+      errs() << "[MemLLVM] GlobalLifecyclePass: Injected MemLLVM_InitCout() for std::cout/cerr\n";
+    }
+  }
+
   // 2. Intercept and lower global destructors registered via atexit / __cxa_atexit
   struct DtorCall {
     Value *Fn;
@@ -90,11 +112,19 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
           Function *Callee = CI->getCalledFunction();
           if (Callee) {
             if (Callee->getName() == "atexit" && CI->arg_size() >= 1) {
-              Dtors.push_back({CI->getArgOperand(0), nullptr});
-              AtexitCalls.push_back(CI);
+              Value *FnArg = CI->getArgOperand(0);
+              if (isa<Constant>(FnArg)) {
+                Dtors.push_back({FnArg, nullptr});
+                AtexitCalls.push_back(CI);
+              }
             } else if (Callee->getName() == "__cxa_atexit" && CI->arg_size() >= 2) {
-              Dtors.push_back({CI->getArgOperand(0), CI->getArgOperand(1)});
-              AtexitCalls.push_back(CI);
+              Value *FnArg = CI->getArgOperand(0);
+              Value *ObjArg = CI->getArgOperand(1);
+              // Only lower across functions if both function and object pointer are constants (e.g. global objects)
+              if (isa<Constant>(FnArg) && isa<Constant>(ObjArg)) {
+                Dtors.push_back({FnArg, ObjArg});
+                AtexitCalls.push_back(CI);
+              }
             }
           }
         }

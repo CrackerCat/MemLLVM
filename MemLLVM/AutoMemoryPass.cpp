@@ -32,6 +32,11 @@ PreservedAnalyses AutoMemoryPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
   auto synthesizeNew = [&](Function *F) {
     if (!F || !F->isDeclaration()) return;
+    Comdat *C = M.getOrInsertComdat(F->getName());
+    C->setSelectionKind(Comdat::Any);
+    F->setComdat(C);
+    F->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
     BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
     IRBuilder<> B(BB);
     Value *SizeVal = F->getArg(0);
@@ -50,6 +55,11 @@ PreservedAnalyses AutoMemoryPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
   auto synthesizeDelete = [&](Function *F) {
     if (!F || !F->isDeclaration()) return;
+    Comdat *C = M.getOrInsertComdat(F->getName());
+    C->setSelectionKind(Comdat::Any);
+    F->setComdat(C);
+    F->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
     BasicBlock *EntryBB = BasicBlock::Create(Ctx, "entry", F);
     BasicBlock *FreeBB = BasicBlock::Create(Ctx, "do_free", F);
     BasicBlock *RetBB = BasicBlock::Create(Ctx, "exit", F);

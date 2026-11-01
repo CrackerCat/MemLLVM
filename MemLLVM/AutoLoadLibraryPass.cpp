@@ -22,14 +22,17 @@ namespace memllvm {
 PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM) {
   // Ensure _fltused is defined to satisfy MSVC/LLD floating point CRT contract under /nodefaultlib
   if (!M.getGlobalVariable("_fltused")) {
-    new GlobalVariable(
+    GlobalVariable *FltUsed = new GlobalVariable(
       M,
       Type::getInt32Ty(M.getContext()),
       false,
-      GlobalValue::CommonLinkage,
+      GlobalValue::LinkOnceODRLinkage,
       ConstantInt::get(Type::getInt32Ty(M.getContext()), 0x9875),
       "_fltused"
     );
+    Comdat *C = M.getOrInsertComdat("_fltused");
+    C->setSelectionKind(Comdat::Any);
+    FltUsed->setComdat(C);
   }
 
   Function *EntryFn = findOrSynthesizeEntryPoint(M);

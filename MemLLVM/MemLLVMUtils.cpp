@@ -77,20 +77,8 @@ Function *findOrSynthesizeEntryPoint(Module &M) {
     return MainFn;
   }
 
-  // 3. Fallback: find any non-declaration function
-  for (Function &F : M) {
-    if (!F.isDeclaration() && !F.empty() && F.getName() != "MemLLVM_GetApiAddress") {
-      EntryFn = &F;
-      break;
-    }
-  }
-
-  if (EntryFn && EntryFn != &*M.begin()) {
-    M.getFunctionList().splice(M.begin(), M.getFunctionList(), EntryFn->getIterator());
-    errs() << "[MemLLVM] Auto-promoted entry function @" << EntryFn->getName() 
-           << " to binary offset 0x00!\n";
-  }
-  return EntryFn;
+  // 3. Library module: no main/WinMain found
+  return nullptr;
 }
 
 } // namespace memllvm

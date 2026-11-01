@@ -24,6 +24,11 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
   auto synthesizeAbort = [&](Function *F, uint32_t code) {
     if (!F || !F->isDeclaration()) return;
+    Comdat *C = M.getOrInsertComdat(F->getName());
+    C->setSelectionKind(Comdat::Any);
+    F->setComdat(C);
+    F->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
     BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
     IRBuilder<> B(BB);
     B.CreateCall(getOrInsertExitProcess(), {ConstantInt::get(Int32Ty, code)});
@@ -35,6 +40,11 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
   auto synthesizeNoop = [&](Function *F) {
     if (!F || !F->isDeclaration()) return;
+    Comdat *C = M.getOrInsertComdat(F->getName());
+    C->setSelectionKind(Comdat::Any);
+    F->setComdat(C);
+    F->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
     BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
     IRBuilder<> B(BB);
     if (F->getReturnType()->isVoidTy()) {
@@ -75,6 +85,10 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
     "__std_exception_copy",
     "__std_exception_destroy",
     "?_Set_raise_handler@std@@YAP6AXAEBVexception@stdext@@@ZP6AX0@Z@Z",
+    "?uncaught_exception@std@@YA_NXZ",
+    "?uncaught_exceptions@std@@YAHXZ",
+    "?_Init@locale@std@@CAPEAV_Locimp@12@_N@Z",
+    "?_Getgloballocale@locale@std@@CAPEAV_Locimp@12@XZ",
     "_Init_thread_lock",
     "_Init_thread_unlock"
   };
@@ -95,6 +109,19 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
+  // Synthesize const type_info::`vftable' dummy pointer if declared
+  if (GlobalVariable *GV = M.getGlobalVariable("??_7type_info@@6B@")) {
+    if (GV->isDeclaration()) {
+      Comdat *C = M.getOrInsertComdat(GV->getName());
+      C->setSelectionKind(Comdat::Any);
+      GV->setComdat(C);
+      GV->setLinkage(GlobalValue::LinkOnceODRLinkage);
+      GV->setInitializer(Constant::getNullValue(GV->getValueType()));
+      Changed = true;
+      errs() << "[MemLLVM] StlStubPass: Synthesized type_info::`vftable`\n";
+    }
+  }
+
   // =========================================================================
   // 1. Thread-Safe Statics Support: Localize _Init_thread_epoch and synthesize helpers
   // =========================================================================
@@ -108,6 +135,11 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
   if (Function *F = M.getFunction("_Init_thread_header")) {
     if (F->isDeclaration()) {
+      Comdat *C = M.getOrInsertComdat(F->getName());
+      C->setSelectionKind(Comdat::Any);
+      F->setComdat(C);
+      F->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
       BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
       BasicBlock *SetBB = BasicBlock::Create(Ctx, "init", F);
       BasicBlock *RetBB = BasicBlock::Create(Ctx, "done", F);
@@ -131,6 +163,11 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
   if (Function *F = M.getFunction("_Init_thread_footer")) {
     if (F->isDeclaration()) {
+      Comdat *C = M.getOrInsertComdat(F->getName());
+      C->setSelectionKind(Comdat::Any);
+      F->setComdat(C);
+      F->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
       BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
       IRBuilder<> B(BB);
       Value *pOnce = F->getArg(0);
@@ -146,6 +183,11 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
   if (Function *F = M.getFunction("_Init_thread_abort")) {
     if (F->isDeclaration()) {
+      Comdat *C = M.getOrInsertComdat(F->getName());
+      C->setSelectionKind(Comdat::Any);
+      F->setComdat(C);
+      F->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
       BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
       IRBuilder<> B(BB);
       Value *pOnce = F->getArg(0);
@@ -163,11 +205,86 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
   for (const char *name : atexitNames) {
     if (Function *F = M.getFunction(name)) {
       if (F->isDeclaration()) {
+        Comdat *C = M.getOrInsertComdat(F->getName());
+        C->setSelectionKind(Comdat::Any);
+        F->setComdat(C);
+        F->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
         BasicBlock *BB = BasicBlock::Create(Ctx, "entry", F);
         IRBuilder<> B(BB);
         B.CreateRet(ConstantInt::get(F->getReturnType(), 0));
         Changed = true;
         errs() << "[MemLLVM] StlStubPass: Synthesized safe fallback " << F->getName() << "\n";
+      }
+    }
+  }
+
+  // =========================================================================
+  // 3. Native Emulated TLS: Lower llvm.threadlocal.address to MemLLVM_GetThreadLocalAddress
+  // =========================================================================
+  SmallVector<Function *, 4> TlsIntrinsicFns;
+  for (Function &F : M) {
+    if (F.getName().starts_with("llvm.threadlocal.address")) {
+      TlsIntrinsicFns.push_back(&F);
+    }
+  }
+
+  if (!TlsIntrinsicFns.empty()) {
+    Type *PtrTy = PointerType::getUnqual(Ctx);
+    Type *Int64Ty = Type::getInt64Ty(Ctx);
+    FunctionCallee GetTlsCallee = M.getOrInsertFunction(
+        "MemLLVM_GetThreadLocalAddress",
+        FunctionType::get(PtrTy, {PtrTy, Int64Ty, PtrTy}, false));
+
+    for (Function *TlsFn : TlsIntrinsicFns) {
+      SmallVector<CallInst *, 16> TlsCalls;
+      for (User *U : TlsFn->users()) {
+        if (auto *CI = dyn_cast<CallInst>(U)) {
+          TlsCalls.push_back(CI);
+        }
+      }
+
+      for (CallInst *CI : TlsCalls) {
+        Value *Arg = CI->getArgOperand(0);
+        auto *GV = dyn_cast<GlobalVariable>(Arg->stripPointerCasts());
+        if (!GV) continue;
+
+        Type *ValTy = GV->getValueType();
+        uint64_t AllocSize = M.getDataLayout().getTypeAllocSize(ValTy);
+
+        // 1. Get or create index GV
+        std::string IndexName = (GV->getName() + ".tl_index").str();
+        GlobalVariable *IndexGV = M.getGlobalVariable(IndexName);
+        if (!IndexGV) {
+          IndexGV = new GlobalVariable(
+              M, Int32Ty, false, GlobalValue::InternalLinkage,
+              ConstantInt::get(Int32Ty, 0), IndexName);
+        }
+
+        // 2. Get or create template GV
+        std::string TemplName = (GV->getName() + ".tl_templ").str();
+        GlobalVariable *TemplGV = M.getGlobalVariable(TemplName);
+        if (!TemplGV) {
+          Constant *Init = GV->hasInitializer() ? GV->getInitializer() : Constant::getNullValue(ValTy);
+          TemplGV = new GlobalVariable(
+              M, ValTy, true, GlobalValue::InternalLinkage,
+              Init, TemplName);
+        }
+
+        // 3. Replace CI with MemLLVM_GetThreadLocalAddress(IndexGV, AllocSize, TemplGV)
+        IRBuilder<> B(CI);
+        Value *Res = B.CreateCall(GetTlsCallee, {IndexGV, ConstantInt::get(Int64Ty, AllocSize), TemplGV});
+        CI->replaceAllUsesWith(Res);
+        CI->eraseFromParent();
+        Changed = true;
+        errs() << "[MemLLVM] StlStubPass: Lowered thread_local access for @" << GV->getName() << "\n";
+      }
+    }
+
+    // Clear thread_local attribute on all globals so backend doesn't emit TLS sections or emutls
+    for (GlobalVariable &GV : M.globals()) {
+      if (GV.isThreadLocal()) {
+        GV.setThreadLocal(false);
       }
     }
   }

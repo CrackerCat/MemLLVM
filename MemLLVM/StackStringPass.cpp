@@ -54,8 +54,7 @@ static bool canTransformGlobalString(GlobalVariable *GV) {
     return false;
 
   bool isStringSymbol = GV->getName().starts_with("??_C@") || 
-                        GV->getName().contains(".str") ||
-                        (Bytes.size() > 0 && Bytes.back() == 0);
+                        GV->getName().contains(".str");
   if (!isStringSymbol)
     return false;
 
