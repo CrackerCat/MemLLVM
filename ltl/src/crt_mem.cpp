@@ -533,7 +533,11 @@ void __memllvm_get_ansi_argv(int *out_argc, char ***out_argv) {
         return;
     }
 
-    int eff_argc = numArgs - 1;
+    // argv[0] is the program name -- C semantics count it in argc. Dropping it
+    // here shifts every user argument one slot to the left, so a program invoked
+    // as "app.exe version" would see argc == 1 and argv[0] == "version", i.e. it
+    // would treat its first real argument as the executable path and run nothing.
+    int eff_argc = numArgs;
     void *heap = GetProcessHeap();
     char **argvA = static_cast<char **>(HeapAlloc(heap, 8 /* HEAP_ZERO_MEMORY */, (eff_argc + 1) * sizeof(char *)));
     if (!argvA) {
@@ -545,7 +549,7 @@ void __memllvm_get_ansi_argv(int *out_argc, char ***out_argv) {
     }
 
     for (int i = 0; i < eff_argc; ++i) {
-        const wchar_t *wstr = argvW[i + 1];
+        const wchar_t *wstr = argvW[i];
         int len = WideCharToMultiByte(0 /* CP_ACP */, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
         if (len > 0) {
             char *buf = static_cast<char *>(HeapAlloc(heap, 0, len));
@@ -575,8 +579,11 @@ void __memllvm_get_wide_argv(int *out_argc, wchar_t ***out_argv) {
         if (out_argv) *out_argv = fallback_argv;
         return;
     }
-    if (out_argc) *out_argc = numArgs - 1;
-    if (out_argv) *out_argv = &argvW[1];
+    // Same as the ANSI variant: keep argv[0] (the program name) in argv so that
+    // argc/argv follow the standard CRT contract. CommandLineToArgvW already
+    // returns exactly that layout, so hand it back untouched.
+    if (out_argc) *out_argc = numArgs;
+    if (out_argv) *out_argv = argvW;
 }
 
 } // extern "C"
