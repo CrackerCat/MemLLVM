@@ -11,8 +11,10 @@ permissions:
 jobs:
   # ------------------------------------------------------------------
   # Job 1: build the mimikatz flat binary from source on the runner.
-  # Requires: pinned LLVM 22.1.8 (pass plugin ABI), the precommitted
-  # MemLLVM.dll plugin, ltl/ltl.lib and examples/mimikatz/lib/x64/*.lib.
+  # Requires: the precommitted MemLLVM.dll plugin, the pinned
+  # plugin-compatible clang toolchain (release_artifacts/
+  # clang-plugin-toolchain.zip), ltl/ltl.lib and
+  # examples/mimikatz/lib/x64/*.lib.
   # ------------------------------------------------------------------
   build-mimikatz:
     name: Build mimikatz Flat Binary
@@ -30,37 +32,29 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Install LLVM 22.1.8 (must match the pass plugin ABI)
+      - name: Unpack Pinned Plugin-Compatible LLVM Toolchain
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $ver = '22.1.8'
-          # Official asset names changed across LLVM releases; try both.
-          $candidates = @(
-            "https://github.com/llvm/llvm-project/releases/download/llvmorg-$ver/LLVM-$ver-Windows-X64.exe",
-            "https://github.com/llvm/llvm-project/releases/download/llvmorg-$ver/LLVM-$ver-win64.exe"
-          )
-          $installer = "$env:RUNNER_TEMP\llvm-installer.exe"
-          $downloaded = $false
-          foreach ($url in $candidates) {
-            try {
-              Write-Host "Downloading $url"
-              Invoke-WebRequest -Uri $url -OutFile $installer -MaximumRedirection 10
-              $downloaded = $true
-              break
-            } catch {
-              Write-Host "  not found, trying next candidate"
-            }
-          }
-          if (-not $downloaded) { throw "Could not download LLVM $ver from any known URL" }
-          # NSIS silent install
-          Start-Process -FilePath $installer -ArgumentList '/S' -Wait
-          $clang = "C:\Program Files\LLVM\bin\clang-cl.exe"
-          if (-not (Test-Path $clang)) { throw "clang-cl.exe not found after installation" }
-          $v = & $clang --version | Select-Object -First 1
-          Write-Host "[+] Installed: $v"
-          if ($v -notlike "*$ver*") { throw "LLVM version mismatch: expected $ver, got $v" }
-          Add-Content $env:GITHUB_PATH "C:\Program Files\LLVM\bin"
+          # The MemLLVM pass plugin is statically linked against a private
+          # LLVM build. Official LLVM release binaries are NOT C++-ABI
+          # compatible with it: the plugin registers but the first pass run
+          # dies with STATUS_HEAP_CORRUPTION (0xC0000374). Verified locally:
+          # same 22.1.8 commit from the official NSIS installer crashes,
+          # the pinned dev build works. So ship the exact clang-cl.exe plus
+          # builtin headers the plugin was built against, committed at
+          # release_artifacts/clang-plugin-toolchain.zip (~38 MB, layout:
+          # bin/clang-cl.exe + lib/clang/22/include).
+          $dest = "C:\LLVM-22-plugin"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -Path "release_artifacts/clang-plugin-toolchain.zip" -DestinationPath $dest -Force
+          $cc = Join-Path $dest "bin\clang-cl.exe"
+          if (-not (Test-Path $cc)) { throw "clang-cl.exe missing after unpack" }
+          if (-not (Test-Path (Join-Path $dest "lib\clang\22\include\stdint.h"))) { throw "builtin headers missing after unpack" }
+          $v = & $cc --version | Select-Object -First 1
+          Write-Host "[+] Toolchain: $v"
+          if ($v -notlike "*22.1.8*") { throw "toolchain version mismatch: expected 22.1.8, got $v" }
+          Add-Content $env:GITHUB_PATH (Join-Path $dest "bin")
 
       - name: Verify Plugin & Runtime Are Present
         shell: pwsh
@@ -89,13 +83,14 @@ jobs:
           $root = (Get-Location).Path
           $proj = Join-Path $root "examples\mimikatz"
           # /p: overrides exist because Directory.Build.props carries local-machine
-          # defaults: LLVMInstallDir (CI installs to Program Files) and
-          # MemLLVMPython (the runner's python is on PATH). MEMLLVM_DIR is
-          # derived from the props file location, so no override is needed.
+          # defaults: LLVMInstallDir (CI unpacks the pinned toolchain to
+          # C:\LLVM-22-plugin) and MemLLVMPython (the runner's python is on
+          # PATH). MEMLLVM_DIR is derived from the props file location, so no
+          # override is needed.
           msbuild "examples\mimikatz\mimikatz\mimikatz.vcxproj" `
             /p:Configuration=Release /p:Platform=x64 `
             "/p:SolutionDir=$proj\" `
-            "/p:LLVMInstallDir=C:\Program Files\LLVM" `
+            "/p:LLVMInstallDir=C:\LLVM-22-plugin" `
             /p:MemLLVMPython=python `
             /m /v:m /nologo
           if ($LASTEXITCODE -ne 0) { throw "msbuild failed with $LASTEXITCODE" }

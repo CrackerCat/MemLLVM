@@ -84,6 +84,8 @@ $RECYCLE.BIN/
 
 *.zip
 
+# pinned plugin-compatible clang toolchain shipped for CI (see release.yml)
+!release_artifacts/clang-plugin-toolchain.zip
 
 # ==========================================
 # mimikatz example & CSLoader exceptions
