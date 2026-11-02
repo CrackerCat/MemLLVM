@@ -45,35 +45,59 @@ static char __ltl_fake_stdin[16]  = { 0 };
 static char __ltl_fake_stdout[16] = { 0 };
 static char __ltl_fake_stderr[16] = { 0 };
 
+extern "C" intptr_t __cdecl _get_osfhandle(int fd);
+
 static HANDLE get_stream_handle(void* stream, bool for_write) {
+    auto resolve_handle = [](DWORD stdId, int fd) -> HANDLE {
+        HANDLE h = GetStdHandle(stdId);
+        if (!h || h == INVALID_HANDLE_VALUE) {
+            intptr_t osf = _get_osfhandle(fd);
+            if (osf != -1) h = reinterpret_cast<HANDLE>(osf);
+        }
+        return h;
+    };
+
     if (!stream) {
-        return GetStdHandle(for_write ? STD_OUTPUT_HANDLE : STD_INPUT_HANDLE);
+        return resolve_handle(for_write ? STD_OUTPUT_HANDLE : STD_INPUT_HANDLE, for_write ? 1 : 0);
     }
     if (stream == reinterpret_cast<void*>(1) || stream == &__ltl_stdout_file || stream == __ltl_fake_stdout) {
-        return GetStdHandle(STD_OUTPUT_HANDLE);
+        return resolve_handle(STD_OUTPUT_HANDLE, 1);
     }
     if (stream == reinterpret_cast<void*>(2) || stream == reinterpret_cast<void*>(3) ||
         stream == &__ltl_stderr_file || stream == __ltl_fake_stderr) {
         HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
-        if (hErr && hErr != INVALID_HANDLE_VALUE) return hErr;
-        return GetStdHandle(STD_OUTPUT_HANDLE);
+        if (!hErr || hErr == INVALID_HANDLE_VALUE) {
+            hErr = GetStdHandle(STD_OUTPUT_HANDLE);
+        }
+        if (!hErr || hErr == INVALID_HANDLE_VALUE) {
+            intptr_t osf = _get_osfhandle(2);
+            if (osf == -1) osf = _get_osfhandle(1);
+            if (osf != -1) hErr = reinterpret_cast<HANDLE>(osf);
+        }
+        return hErr;
     }
     if (stream == reinterpret_cast<void*>(0) || stream == &__ltl_stdin_file || stream == __ltl_fake_stdin) {
-        return GetStdHandle(STD_INPUT_HANDLE);
+        return resolve_handle(STD_INPUT_HANDLE, 0);
     }
     LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
     if (lf->magic == 0x4C544C46) {
         if (lf->is_std) {
-            if (lf->std_idx == 0) return GetStdHandle(STD_INPUT_HANDLE);
+            if (lf->std_idx == 0) return resolve_handle(STD_INPUT_HANDLE, 0);
             if (lf->std_idx == 2) {
                 HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
-                if (hErr && hErr != INVALID_HANDLE_VALUE) return hErr;
+                if (!hErr || hErr == INVALID_HANDLE_VALUE) hErr = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (!hErr || hErr == INVALID_HANDLE_VALUE) {
+                    intptr_t osf = _get_osfhandle(2);
+                    if (osf == -1) osf = _get_osfhandle(1);
+                    if (osf != -1) hErr = reinterpret_cast<HANDLE>(osf);
+                }
+                return hErr;
             }
-            return GetStdHandle(STD_OUTPUT_HANDLE);
+            return resolve_handle(STD_OUTPUT_HANDLE, 1);
         }
         return lf->handle;
     }
-    return GetStdHandle(for_write ? STD_OUTPUT_HANDLE : STD_INPUT_HANDLE);
+    return resolve_handle(for_write ? STD_OUTPUT_HANDLE : STD_INPUT_HANDLE, for_write ? 1 : 0);
 }
 
 static HANDLE get_output_handle(void* stream) {
@@ -135,6 +159,10 @@ struct WideSink {
     WideSink(HANDLE handle, wchar_t* ubuf = nullptr, size_t umax = 0)
         : h(handle), user_buf(ubuf), user_max(umax), total_written(0), local_count(0) {}
 
+    ~WideSink() {
+        finish();
+    }
+
     void flush() {
         if (user_buf) return;
         if (local_count > 0) {
@@ -182,6 +210,10 @@ struct NarrowSink {
 
     NarrowSink(HANDLE handle, char* ubuf = nullptr, size_t umax = 0)
         : h(handle), user_buf(ubuf), user_max(umax), total_written(0), local_count(0) {}
+
+    ~NarrowSink() {
+        finish();
+    }
 
     void flush() {
         if (user_buf) return;

@@ -1,0 +1,38 @@
+[*] payload   : C:\Users\admin\Downloads\mimikatz-master\mimikatz-master\x64\mimikatz_mllvm.bin
+[*] size      : 1873379 bytes
+[*] base      : 000001ABFAF70000 (RWX)
+[*] std handles seen by the payload: out=0000000000000104 err=0000000000000108 in=000000000000010C
+
+------------------------ [ PAYLOAD OUTPUT BEGIN ] ------------------------
+
+  .#####.   mimikatz 2.2.0 (x64) #19041 Nov  2 2026 15:50:57
+ .## ^ ##.  "A La Vie, A L'Amour" - (oe.eo)
+ ## / \ ##  /*** Benjamin DELPY `gentilkiwi` ( benjamin@gentilkiwi.com )
+ ## \ / ##       > https://blog.gentilkiwi.com/mimikatz
+ '## v ##'       Vincent LE TOUX             ( vincent.letoux@gmail.com )
+  '#####'        > https://pingcastle.com / https://mysmartlogon.com ***/
+
+mimikatz(commandline) # C:\Users\admin\Downloads\mimikatz-master\mimikatz-master\x64\mimikatz_mllvm.bin
+ERROR mimikatz_doLocal ; "C:\Users\admin\Downloads\mimikatz-master\mimikatz-master\x64\mimikatz_mllvm.bin" command of "standard" module not found !
+
+Module :	standard
+Full name :	Standard module
+Description :	Basic commands (does not require module name)
+
+            exit  -  Quit mimikatz
+             cls  -  Clear screen (doesn't work with redirections, like PsExec)
+          answer  -  Answer to the Ultimate Question of Life, the Universe, and Everything
+          coffee  -  Please, make me a coffee!
+           sleep  -  Sleep an amount of milliseconds
+             log  -  Log mimikatz input/output to file
+          base64  -  Switch file input/output base64
+         version  -  Display some version informations
+              cd  -  Change or display current directory
+       localtime  -  Displays system local date and time (OJ command)
+        hostname  -  Displays system local hostname
+
+------------------------- [ PAYLOAD OUTPUT END ] -------------------------
+[*] wait      : signaled
+[*] exit code : 0x00000000 (0)
+[*] elapsed   : lu ms
+[*] captured  : 1392 bytes
