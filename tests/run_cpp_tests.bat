@@ -55,6 +55,8 @@ echo [*] Compiling and running Test 1: STL vector container...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_stl_basic.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_stl_basic.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_stl_basic.bin D:\MemLLVM\tests\test_cpp_stl_basic.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_stl_basic.bin 600
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 1 Status: %ERRORLEVEL%]
 
@@ -64,6 +66,8 @@ echo [*] Compiling and running Test 2: Global Objects and Constructors...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_global_obj.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_global_obj.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_global_obj.bin D:\MemLLVM\tests\test_cpp_global_obj.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_global_obj.bin 1125
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 2 Status: %ERRORLEVEL%]
 
@@ -73,6 +77,8 @@ echo [*] Compiling and running Test 3: Virtual Polymorphism and VTables...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_polymorphism.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_polymorphism.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_polymorphism.bin D:\MemLLVM\tests\test_cpp_polymorphism.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_polymorphism.bin 275
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 3 Status: %ERRORLEVEL%]
 
@@ -82,6 +88,8 @@ echo [*] Compiling and running Test 4: Thread-Safe Function-Local Statics (Singl
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread_safe_static.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread_safe_static.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_thread_safe_static.bin D:\MemLLVM\tests\test_cpp_thread_safe_static.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_thread_safe_static.bin 175
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 4 Status: %ERRORLEVEL%]
 
@@ -91,6 +99,8 @@ echo [*] Compiling and running Test 5: Pointer-bearing Struct Constants...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_struct_ptr_const.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_struct_ptr_const.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_struct_ptr_const.bin D:\MemLLVM\tests\test_cpp_struct_ptr_const.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_struct_ptr_const.bin 777
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 5 Status: %ERRORLEVEL%]
 
@@ -100,6 +110,8 @@ echo [*] Compiling and running Test 6: Initialized and Uninitialized Globals (.d
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_globals_data_bss.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_globals_data_bss.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_globals_data_bss.bin D:\MemLLVM\tests\test_cpp_globals_data_bss.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_globals_data_bss.bin 888
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 6 Status: %ERRORLEVEL%]
 
@@ -109,6 +121,8 @@ echo [*] Compiling and running Test 7: std::mutex and std::lock_guard...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_mutex.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_mutex.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_mutex.bin D:\MemLLVM\tests\test_cpp_mutex.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_mutex.bin 350
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 7 Status: %ERRORLEVEL%]
 
@@ -118,6 +132,8 @@ echo [*] Compiling and running Test 8: std::thread multi-threading...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_thread.bin D:\MemLLVM\tests\test_cpp_thread.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_thread.bin 400
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 8 Status: %ERRORLEVEL%]
 
@@ -127,6 +143,8 @@ echo [*] Compiling and running Test 9: thread_local native emulated TLS...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_thread_local.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_thread_local.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_thread_local.bin D:\MemLLVM\tests\test_cpp_thread_local.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_thread_local.bin 130
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 9 Status: %ERRORLEVEL%]
 
@@ -136,6 +154,8 @@ echo [*] Compiling and running Test 10: std::filesystem file operations...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_filesystem.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_filesystem.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_filesystem.bin D:\MemLLVM\tests\test_cpp_filesystem.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_filesystem.bin 200
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 10 Status: %ERRORLEVEL%]
 
@@ -145,6 +165,8 @@ echo [*] Compiling and running Test 11: std::cout and std::cerr streams...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_iostream.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_iostream.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_iostream.bin D:\MemLLVM\tests\test_cpp_iostream.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_iostream.bin 105
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 11 Status: %ERRORLEVEL%]
 
@@ -154,6 +176,7 @@ echo [*] Compiling and running Test 12: std::fstream (ifstream, ofstream, std::l
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_fstream.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_fstream.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_fstream.bin D:\MemLLVM\tests\test_cpp_fstream.exe
+rem Skip automated flat_run for cin/fstream
 
 echo [Test 12 Status: %ERRORLEVEL%]
 
@@ -163,6 +186,7 @@ echo [*] Compiling and running Test 13: std::cin console stream input...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_cin.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_cin.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_cin.bin D:\MemLLVM\tests\test_cpp_cin.exe
+rem Skip automated flat_run for cin/fstream
 echo [Test 13 Status: %ERRORLEVEL%]
 
 echo.
@@ -171,6 +195,8 @@ echo [*] Compiling and running Test 14: std::regex and std::regex_search...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_regex.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_regex.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_regex.bin D:\MemLLVM\tests\test_cpp_regex.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_regex.bin 88
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 14 Status: %ERRORLEVEL%]
 
@@ -180,6 +206,8 @@ echo [*] Compiling and running Test 15: std::async, std::future, std::promise...
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_async.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_async.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_async.bin D:\MemLLVM\tests\test_cpp_async.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_async.bin 100
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 15 Status: %ERRORLEVEL%]
 
@@ -190,6 +218,8 @@ set MODULE_FLAGS=/std:c++20 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_module_std.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_module_std.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_module_std.bin D:\MemLLVM\tests\test_cpp_module_std.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_module_std.bin 77
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 16 Status: %ERRORLEVEL%]
 
@@ -199,6 +229,8 @@ echo [*] Compiling and running Test 17: Freestanding Stdio (__stdio_common_vfwpr
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_stdio_kprintf.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_stdio_kprintf.exe
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_stdio_kprintf.bin D:\MemLLVM\tests\test_stdio_kprintf.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_stdio_kprintf.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 17 Status: %ERRORLEVEL%]
 
@@ -213,6 +245,8 @@ if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
 D:\MemLLVM\tests\test_multi_tu.exe
 if %ERRORLEVEL% neq 0 ( echo [-] Execution of test_multi_tu.exe failed! & exit /b 1 )
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_multi_tu.bin D:\MemLLVM\tests\test_multi_tu.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_multi_tu.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 18 Status: %ERRORLEVEL%]
 
