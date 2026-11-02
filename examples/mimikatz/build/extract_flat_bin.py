@@ -36,6 +36,12 @@ Two things used to be wrong here and both are fixed:
 import struct
 import sys
 
+# Print Chinese diagnostics safely on CI runners (cp1252 console would
+# raise UnicodeEncodeError). Force UTF-8 on both streams.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 # IMAGE_REL_BASED_DIR64
 DIR64 = 10
 

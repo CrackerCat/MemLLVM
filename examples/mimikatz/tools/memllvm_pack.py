@@ -36,6 +36,13 @@ SDK 里 examples/{chip8,box2d,doom}/build_*.py 里的 extract_flat_bin_with_self
 import struct
 import sys
 
+# This script prints Chinese diagnostics. On CI runners the console code
+# page is cp1252 and print() of any non-ASCII char raises UnicodeEncodeError
+# (fatal under msbuild). Force UTF-8 on both streams.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 
 # 参与打包的节。代码/只读数据/可写数据，其余（.pdata/.reloc/.rsrc/.idata）丢弃。
 # .mli 是 MemLLVM 的跨 TU 初始化表（.mli$A / .mli$M / .mli$Z 由链接器合并而来），
