@@ -186,6 +186,7 @@ examples/
 ├── doom/        # Classic DOOM 3D Game Engine (83 files, software rasterizer, audio)
 ├── imgui/       # Dear ImGui v1.91+ (Hardware-accelerated DirectX 11, multi-windows)
 ├── sqlite/      # Official SQLite3 CLI Shell (Full interactive REPL, SQL engine)
+├── mimikatz/    # Large-scale Complex C Project (114 TUs, tentative definitions, subsystems)
 └── mock_cli/    # Interactive CLI Diagnostic Stub (Testing stdio pipes & arguments)
 ```
 
@@ -196,6 +197,8 @@ examples/
 | **[Dear ImGui v1.91+](examples/imgui/)** | C++17 Industrial UI | **1.70 MB** | Full immediate-mode GUI, multi-window docking, plots, widgets, hardware-accelerated **DirectX 11 / DXGI** pipeline. |
 | **[Box2D 3.0 Engine](examples/box2d/)** | Pure C (45 files) | **605 KB** | Continuous rigid body physics, dynamic BVH trees, collision impulse solver, real-time Win32 GDI vector rendering. |
 | **[CHIP-8 Virtual Machine](examples/chip8/)** | Modern C++20 | **42 KB** | 35-opcode CPU emulation, frame timers, audio buzzer, 64x32 monochrome display matrix running *Pong* and *Tetris*. |
+| **[Mimikatz 2.2.0](examples/mimikatz/)** | Complex C (114 Translation Units) | **1.20 MB** | Massive real-world code base testing tentative definitions merging, dynamic subsystem resolution, multi-tier struct alignment, and dual-CRT stdio pipe redirection. |
+| **[Mock CLI Diagnostic Stub](examples/mock_cli/)** | Minimal C Runtime | **36 KB** | Dedicated diagnostic tool testing full-duplex stdio pipes, command line argument forwarding, streaming output throughput, and graceful exit handling. |
 
 ---
 
