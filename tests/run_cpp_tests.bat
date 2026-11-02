@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 echo =======================================================================
-echo   MemLLVM Full Modern C++ Regression Test Suite (16 Tests)
+echo   MemLLVM Full Modern C++ Regression Test Suite (17 Tests)
 echo =======================================================================
 
 if not "%LLVM_PATH%"=="" set "LLVM_ROOT=%LLVM_PATH%"
@@ -194,7 +194,16 @@ python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_mo
 echo [Test 16 Status: %ERRORLEVEL%]
 
 echo.
+echo [*] Compiling and running Test 17: Freestanding Stdio (__stdio_common_vfwprintf, __acrt_iob_func, wprintf/printf)...
+"%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_stdio_kprintf.cpp /Fo:D:\MemLLVM\tests\test_stdio_kprintf.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_stdio_kprintf.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_stdio_kprintf.exe
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_stdio_kprintf.bin D:\MemLLVM\tests\test_stdio_kprintf.exe
+
+echo [Test 17 Status: %ERRORLEVEL%]
+
+echo.
 echo =======================================================================
-echo   ALL 16 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
+echo   ALL 17 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
 echo =======================================================================
 endlocal

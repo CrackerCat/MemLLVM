@@ -58,7 +58,7 @@ PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM
           Function *Callee = getDirectCallee(*CB);
           if (Callee && Callee->isDeclaration() && !Callee->isIntrinsic() &&
               !Callee->getName().starts_with("llvm.") &&
-              Callee->getName() != "MemLLVM_GetApiAddress") {
+              Callee->getName() != "MemLLVM_GetApiAddress" && !isStaticShimSymbol(Callee->getName())) {
             std::string reqDll = probeRequiredDllForApi(Callee->getName());
             if (!reqDll.empty()) {
               errs() << "[MemLLVM] Auto-deduced DLL via SDK Import Library Index: "

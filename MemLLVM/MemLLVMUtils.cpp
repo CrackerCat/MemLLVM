@@ -76,6 +76,18 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "_doexit" || Name == "_initterm" || Name == "_initterm_e" ||
       Name == "__memllvm_get_ansi_argv" || Name == "__memllvm_get_wide_argv" ||
       Name == "GetActiveProcessorCount" ||
+      Name.starts_with("__stdio_common_") ||
+      Name.starts_with("__acrt_") ||
+      Name == "__acrt_iob_func" ||
+      Name == "fflush" ||
+      Name == "printf" || Name == "wprintf" ||
+      Name == "fprintf" || Name == "fwprintf" ||
+      Name == "sprintf" || Name == "snprintf" || Name == "swprintf" ||
+      Name == "puts" || Name == "fputs" || Name == "fputws" ||
+      Name == "putchar" || Name == "putwchar" ||
+      Name == "fputc" || Name == "fputwc" ||
+      Name == "fwrite" || Name == "fread" ||
+      Name == "__iob_func" || Name == "__p__iob" ||
       Name == "__C_specific_handler" ||
       Name == "_fltused") {
     return true;
