@@ -89,33 +89,41 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "__memllvm_get_ansi_argv" || Name == "__memllvm_get_wide_argv" ||
       Name == "__memllvm_dispatch_tu_inits" ||
       Name == "GetActiveProcessorCount" ||
+      // Complete Stdio and FILE* family (prefix rules ensure zero omissions)
       Name.starts_with("__stdio_common_") ||
       Name.starts_with("__acrt_") ||
       Name == "__acrt_iob_func" ||
-      Name == "fflush" ||
-      Name == "_fileno" || Name == "_setmode" ||
-      Name == "printf" || Name == "wprintf" ||
-      Name == "fprintf" || Name == "fwprintf" ||
-      Name == "sprintf" || Name == "snprintf" || Name == "swprintf" ||
-      Name == "puts" || Name == "fputs" || Name == "fputws" ||
-      Name == "putchar" || Name == "putwchar" ||
-      Name == "fputc" || Name == "fputwc" ||
-      Name == "fwrite" || Name == "fread" ||
-      Name == "_fwrite_nolock" || Name == "_fread_nolock" ||
-      Name == "fopen" || Name == "_wfopen" ||
-      Name == "fopen_s" || Name == "_wfopen_s" ||
-      Name == "fclose" || Name == "_fclose_nolock" ||
-      Name == "fseek" || Name == "_fseeki64" ||
-      Name == "_fseek_nolock" || Name == "_fseeki64_nolock" ||
-      Name == "ftell" || Name == "_ftelli64" ||
-      Name == "_ftell_nolock" || Name == "_ftelli64_nolock" ||
+      Name.starts_with("fopen") || Name.starts_with("_wfopen") ||
+      Name.starts_with("freopen") || Name.starts_with("_wfreopen") ||
+      Name.starts_with("fclose") || Name == "_fcloseall" ||
+      Name.starts_with("fread") || Name.starts_with("fwrite") ||
+      Name.starts_with("fseek") || Name.starts_with("_fseek") ||
+      Name.starts_with("ftell") || Name.starts_with("_ftell") ||
+      Name.starts_with("fget") || Name.starts_with("_fget") ||
+      Name.starts_with("fput") || Name.starts_with("_fput") ||
+      Name.starts_with("getc") || Name.starts_with("getw") ||
+      Name.starts_with("putc") || Name.starts_with("putw") ||
+      Name.starts_with("_getc") || Name.starts_with("_getw") ||
+      Name.starts_with("_putc") || Name.starts_with("_putw") ||
+      Name.starts_with("unget") || Name.starts_with("_unget") ||
+      Name.starts_with("feof") || Name.starts_with("_feof") ||
+      Name.starts_with("ferror") || Name.starts_with("_ferror") ||
+      Name.starts_with("clearerr") || Name.starts_with("_clearerr") ||
+      Name.starts_with("fflush") || Name.starts_with("_fflush") ||
       Name == "fgetpos" || Name == "fsetpos" || Name == "rewind" ||
-      Name == "feof" || Name == "ferror" || Name == "clearerr" ||
-      Name == "fgetc" || Name == "fgets" || Name == "fgetwc" ||
-      Name == "ungetc" || Name == "ungetwc" ||
-      Name == "setvbuf" ||
+      Name == "setvbuf" || Name == "setbuf" ||
       Name == "remove" || Name == "_wremove" ||
       Name == "rename" || Name == "_wrename" ||
+      Name == "getchar" || Name == "getwchar" ||
+      Name == "putchar" || Name == "putwchar" ||
+      Name == "puts" ||
+      Name == "printf" || Name == "wprintf" ||
+      Name == "vprintf" || Name == "vwprintf" ||
+      Name == "fprintf" || Name == "fwprintf" ||
+      Name == "vfprintf" || Name == "vfwprintf" ||
+      Name == "sprintf" || Name == "snprintf" || Name == "swprintf" ||
+      Name == "vsprintf" || Name == "vsnprintf" || Name == "vswprintf" ||
+      Name == "_fileno" || Name == "_setmode" ||
       Name == "__iob_func" || Name == "__p__iob" ||
       Name == "__C_specific_handler" ||
       Name == "_fltused") {

@@ -1093,6 +1093,12 @@ int __cdecl fputws(const wchar_t* s, void* stream) {
     HANDLE h = get_output_handle(stream);
     size_t len = 0;
     while (s[len]) ++len;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46 && !lf->is_std) {
+        DWORD written = 0;
+        WriteFile(h, s, static_cast<DWORD>(len * sizeof(wchar_t)), &written, nullptr);
+        return static_cast<int>(len);
+    }
     write_wide_to_handle(h, s, len);
     return static_cast<int>(len);
 }
@@ -1121,8 +1127,14 @@ int __cdecl putwchar(wchar_t c) {
     return c;
 }
 
-int __cdecl fputwc(wchar_t c, void* stream) {
+wint_t __cdecl fputwc(wchar_t c, void* stream) {
     HANDLE h = get_output_handle(stream);
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46 && !lf->is_std) {
+        DWORD written = 0;
+        WriteFile(h, &c, sizeof(wchar_t), &written, nullptr);
+        return c;
+    }
     write_wide_to_handle(h, &c, 1);
     return c;
 }
@@ -1368,6 +1380,41 @@ wint_t __cdecl fgetwc(void* stream) {
     return 0xFFFF; // WEOF
 }
 
+wchar_t* __cdecl fgetws(wchar_t* str, int num, void* stream) {
+    if (!str || num <= 0) return nullptr;
+    int idx = 0;
+    while (idx < num - 1) {
+        wint_t c = fgetwc(stream);
+        if (c == 0xFFFF /* WEOF */) {
+            if (idx == 0) return nullptr;
+            break;
+        }
+        str[idx++] = static_cast<wchar_t>(c);
+        if (c == L'\n') break;
+    }
+    str[idx] = L'\0';
+    return str;
+}
+
+int __cdecl getc(void* stream) { return fgetc(stream); }
+int __cdecl _getc_nolock(void* stream) { return fgetc(stream); }
+int __cdecl _fgetc_nolock(void* stream) { return fgetc(stream); }
+
+int __cdecl putc(int c, void* stream) { return fputc(c, stream); }
+int __cdecl _putc_nolock(int c, void* stream) { return fputc(c, stream); }
+int __cdecl _fputc_nolock(int c, void* stream) { return fputc(c, stream); }
+
+wint_t __cdecl getwc(void* stream) { return fgetwc(stream); }
+wint_t __cdecl _getwc_nolock(void* stream) { return fgetwc(stream); }
+wint_t __cdecl _fgetwc_nolock(void* stream) { return fgetwc(stream); }
+
+wint_t __cdecl putwc(wchar_t c, void* stream) { return fputwc(c, stream); }
+wint_t __cdecl _putwc_nolock(wchar_t c, void* stream) { return fputwc(c, stream); }
+wint_t __cdecl _fputwc_nolock(wchar_t c, void* stream) { return fputwc(c, stream); }
+
+int __cdecl getchar(void) { return fgetc(&__ltl_stdin_file); }
+wint_t __cdecl getwchar(void) { return fgetwc(&__ltl_stdin_file); }
+
 int __cdecl ungetc(int c, void* stream) {
     if (c == -1 || !stream) return -1;
     LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
@@ -1389,6 +1436,9 @@ wint_t __cdecl ungetwc(wint_t c, void* stream) {
     }
     return 0xFFFF;
 }
+
+int __cdecl _ungetc_nolock(int c, void* stream) { return ungetc(c, stream); }
+wint_t __cdecl _ungetwc_nolock(wint_t c, void* stream) { return ungetwc(c, stream); }
 
 int __cdecl _fseeki64(void* stream, long long offset, int origin) {
     HANDLE h = get_stream_handle(stream, false);
@@ -1515,6 +1565,41 @@ int __cdecl rename(const char* oldname, const char* newname) {
 int __cdecl _wrename(const wchar_t* oldname, const wchar_t* newname) {
     if (!oldname || !newname) return -1;
     return MoveFileExW(oldname, newname, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
+}
+
+int __cdecl _feof_nolock(void* stream) { return feof(stream); }
+int __cdecl _ferror_nolock(void* stream) { return ferror(stream); }
+void __cdecl _clearerr_nolock(void* stream) { clearerr(stream); }
+int __cdecl _fflush_nolock(void* stream) { return fflush(stream); }
+
+void __cdecl setbuf(void* stream, char* buffer) {
+    setvbuf(stream, buffer, buffer ? 0 : 4, 512);
+}
+
+void* __cdecl freopen(const char* filename, const char* mode, void* stream) {
+    if (stream) fclose(stream);
+    return fopen(filename, mode);
+}
+
+void* __cdecl _wfreopen(const wchar_t* filename, const wchar_t* mode, void* stream) {
+    if (stream) fclose(stream);
+    return _wfopen(filename, mode);
+}
+
+int __cdecl freopen_s(void** pFile, const char* filename, const char* mode, void* stream) {
+    if (!pFile) return 22; // EINVAL
+    *pFile = freopen(filename, mode, stream);
+    return *pFile ? 0 : 2;
+}
+
+int __cdecl _wfreopen_s(void** pFile, const wchar_t* filename, const wchar_t* mode, void* stream) {
+    if (!pFile) return 22; // EINVAL
+    *pFile = _wfreopen(filename, mode, stream);
+    return *pFile ? 0 : 2;
+}
+
+int __cdecl _fcloseall(void) {
+    return 0;
 }
 
 int __cdecl __stdio_common_vsscanf(
