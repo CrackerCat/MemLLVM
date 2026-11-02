@@ -25,11 +25,11 @@ uint32_t calculateRor13(StringRef str) {
 
 namespace {
 
-// Plain section name, no `$` subgroup. lld-link does not sort COFF `$` subgroups
-// across input files, so a `.mli$A` / `.mli$Z` sentinel pair can end up with the
-// end sentinel ahead of the slots and the walk would silently do nothing.
-// A plain name is merged reliably by both linkers.
-constexpr const char *kInitSection = ".mli";
+// Slot section name using `$m` subgroup. LLD and MSVC link.exe sort COFF `$` subgroups
+// alphabetically within a merged section (.mli$a < .mli$m < .mli$z).
+// Sentinels .mli$a (__memllvm_mli_start) and .mli$z (__memllvm_mli_end) in ltl.lib bracket
+// all TU initializer slots in .mli$m across translation units.
+constexpr const char *kInitSection = ".mli$m";
 constexpr const char *kTuInitName = "__memllvm_tu_init";
 
 } // namespace
@@ -44,11 +44,23 @@ Function *getDirectCallee(const CallBase &CB) {
 }
 
 bool isStaticShimSymbol(StringRef Name) {
+  // LLVM prefixes a global's name with \x01 when the symbol must be emitted
+  // verbatim (no target mangling). The byte is invisible in diagnostics, so a
+  // "\x01_fileno" declaration would slip past every exact-match test below and
+  // get resolved dynamically even though ltl defines it. Strip it first.
+  if (!Name.empty() && Name.front() == '\x01')
+    Name = Name.drop_front();
+
   // 1. Any MSVC C++ mangled symbol (?...) belongs to C++ modules / LTL / templates, NOT external Win32 DLL exports
   if (Name.starts_with("?"))
     return true;
 
   // 2. Runtime shims, threading, memory, intrinsics, and CRT builtins provided statically by LTL
+  //
+  // _fileno / _setmode must stay with ltl: __acrt_iob_func hands out ltl's own
+  // 16-byte dummy FILE blobs, so the host UCRT _fileno would dereference one
+  // and read a garbage fd; _setmode then range-checks that fd, fails, and
+  // routes through _invalid_parameter -- the process dies before the banner.
   if (Name.starts_with("_Mtx_") || Name.starts_with("_Cnd_") ||
       Name.starts_with("_Thrd_") || Name.starts_with("__emutls_") ||
       Name.starts_with("__std_") || Name.starts_with("__CxxFrameHandler") ||
@@ -75,11 +87,13 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "atexit" || Name == "__cxa_atexit" || Name == "exit" || Name == "_exit" ||
       Name == "_doexit" || Name == "_initterm" || Name == "_initterm_e" ||
       Name == "__memllvm_get_ansi_argv" || Name == "__memllvm_get_wide_argv" ||
+      Name == "__memllvm_dispatch_tu_inits" ||
       Name == "GetActiveProcessorCount" ||
       Name.starts_with("__stdio_common_") ||
       Name.starts_with("__acrt_") ||
       Name == "__acrt_iob_func" ||
       Name == "fflush" ||
+      Name == "_fileno" || Name == "_setmode" ||
       Name == "printf" || Name == "wprintf" ||
       Name == "fprintf" || Name == "fwprintf" ||
       Name == "sprintf" || Name == "snprintf" || Name == "swprintf" ||

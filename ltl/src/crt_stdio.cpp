@@ -843,6 +843,30 @@ void* __cdecl __acrt_iob_func(unsigned int idx) {
     return __ltl_fake_stdout;
 }
 
+/* _fileno / _setmode —— 必须由 ltl 自己回答。
+ *
+ * CRT 初始化代码（以及常见的 kull_m_output_init 之类）会拿 stdout/stderr 去问
+ * fd 号，再切成 _O_U8TEXT 文本模式。但 __acrt_iob_func 返回的是本文件里的哑
+ * 结构，交给宿主 UCRT 的 _fileno 会被当成 FILE* 解引用，读出一个越界的垃圾 fd；
+ * 紧接着 _setmode 对该 fd 做范围校验，走 _invalid_parameter 直接终止进程 ——
+ * 表现就是「banner 一个字都没打出来，进程就没了」。
+ *
+ * 输出编码由 __stdio_common_vfwprintf 内部完成（UTF-16 -> UTF-8 -> WriteFile），
+ * 不依赖 CRT 的文本模式，所以 _setmode 只需接受调用并如实回报旧模式。
+ */
+int __cdecl _fileno(void* stream) {
+    if (stream == __ltl_fake_stdin)  return 0;
+    if (stream == __ltl_fake_stdout) return 1;
+    if (stream == __ltl_fake_stderr) return 2;
+    return -1;
+}
+
+int __cdecl _setmode(int fd, int mode) {
+    (void)fd;
+    (void)mode;
+    return 0x4000; /* _O_TEXT：MSVC 下标准流的默认模式 */
+}
+
 void* __cdecl __p__iob(void) {
     return __ltl_fake_stdout;
 }
@@ -853,7 +877,19 @@ void* __cdecl __iob_func(void) {
 
 int __cdecl fflush(void* stream) {
     HANDLE h = get_output_handle(stream);
-    if (h && h != INVALID_HANDLE_VALUE) {
+
+    /* 只对磁盘句柄真的去刷。
+     *
+     * ltl 的 stdio 没有用户态缓冲：每次 printf 都是直接 WriteFile 落到句柄，
+     * 所以 fflush 本身没有数据要刷；内核里唯一可能积压的是磁盘文件。
+     *
+     * 对管道调用 FlushFileBuffers 会一直阻塞到对端把数据全部读走。而加载器
+     * 的典型写法是「先 WaitForSingleObject 等 payload 线程结束，再去读管道」，
+     * 于是两边互相等待 —— payload 卡在 fflush 里退不出去，加载器卡在 wait 里
+     * 不来读，stdout 明明已经写进管道却谁也看不到。表现就是「打完 banner
+     * 就没反应」。控制台句柄同理，刷它没有任何意义。
+     */
+    if (h && h != INVALID_HANDLE_VALUE && GetFileType(h) == FILE_TYPE_DISK) {
         FlushFileBuffers(h);
     }
     return 0;
@@ -913,6 +949,53 @@ int __cdecl __stdio_common_vsprintf(
     (void)locale;
     NarrowSink sink(nullptr, buffer, buffer_count);
     return format_narrow(sink, format, ap);
+}
+
+/* _s 变体：MSVC 的 _vsnwprintf_s / _vsnprintf_s 最终落到这两个。
+ *
+ * 和上面的非 _s 版本只有语义差别：buffer 必须非空、容量必须大于 0，
+ * 而且一旦发生截断就返回 -1（调用方据此判定「缓冲区不够」）。format_wide /
+ * format_narrow 返回的是「本应写入的长度」，截断时它会 >= buffer_count，
+ * 所以用它和容量比较就能识别截断，不需要额外扫描。
+ */
+int __cdecl __stdio_common_vswprintf_s(
+    unsigned long long options,
+    wchar_t* buffer,
+    size_t buffer_count,
+    const wchar_t* format,
+    void* locale,
+    va_list ap
+) {
+    int r;
+    (void)options;
+    (void)locale;
+    if (!buffer || buffer_count == 0)
+        return -1;
+    WideSink sink(nullptr, buffer, buffer_count);
+    r = format_wide(sink, format, ap);
+    if (r < 0 || static_cast<size_t>(r) >= buffer_count)
+        return -1;
+    return r;
+}
+
+int __cdecl __stdio_common_vsprintf_s(
+    unsigned long long options,
+    char* buffer,
+    size_t buffer_count,
+    const char* format,
+    void* locale,
+    va_list ap
+) {
+    int r;
+    (void)options;
+    (void)locale;
+    if (!buffer || buffer_count == 0)
+        return -1;
+    NarrowSink sink(nullptr, buffer, buffer_count);
+    r = format_narrow(sink, format, ap);
+    if (r < 0 || static_cast<size_t>(r) >= buffer_count)
+        return -1;
+    return r;
 }
 
 int __cdecl __stdio_common_vsnprintf_s(

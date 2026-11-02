@@ -31,7 +31,16 @@ if (COMMAND llvm_map_components_to_libnames)
 endif()
 
 if (MSVC)
-  target_compile_options(MemLLVM PRIVATE /W3 /wd4267 /wd4244 /wd4146 /wd4245 /wd4324 /wd4458)
+  # /utf-8: read sources as UTF-8 and set the execution charset to UTF-8.
+  #
+  # Without it MSVC decodes the file with the system ANSI code page (936 on a
+  # zh-CN host). UTF-8 comments then get read as GBK, and because 0x7C ('|') is
+  # a legal GBK trail byte a dangling lead byte at the end of a comment can eat
+  # one '|' out of a '||'. The result still compiles -- it just silently becomes
+  # a bitwise or, which is how `Name == "_fileno"` dropped out of an
+  # isStaticShimSymbol() chain while every diagnostic still looked correct.
+  target_compile_options(MemLLVM PRIVATE /W3 /utf-8
+    /wd4267 /wd4244 /wd4146 /wd4245 /wd4324 /wd4458)
 endif()
 
 # Mirror the freshly built plugin to <repo>/bin/MemLLVM.dll.

@@ -1,0 +1,14 @@
+#include <cstdio>
+
+extern int g_tu2_val;
+
+int main() {
+    printf("[+] In main: g_tu2_val = %d\n", g_tu2_val);
+    if (g_tu2_val == 42) {
+        printf("[+] SUCCESS: Non-entry TU constructor ran before main!\n");
+        return 0;
+    } else {
+        printf("[-] FAILURE: Non-entry TU constructor was NOT dispatched! g_tu2_val = %d\n", g_tu2_val);
+        return 1;
+    }
+}

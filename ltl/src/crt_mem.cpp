@@ -10,7 +10,25 @@ extern "C" void __stdcall ExitProcess(unsigned int uExitCode);
 
 extern "C" {
 
-int _fltused = 0x9875;
+typedef void (*__memllvm_init_fn_t)(void);
+
+#pragma section(".mli$a", read)
+#pragma section(".mli$z", read)
+
+__declspec(allocate(".mli$a")) const __memllvm_init_fn_t __memllvm_mli_start = nullptr;
+__declspec(allocate(".mli$z")) const __memllvm_init_fn_t __memllvm_mli_end = nullptr;
+
+void __memllvm_dispatch_tu_inits(void) {
+    const __memllvm_init_fn_t* cur = &__memllvm_mli_start + 1;
+    const __memllvm_init_fn_t* end = &__memllvm_mli_end;
+    for (; cur < end; ++cur) {
+        if (*cur) {
+            (*cur)();
+        }
+    }
+}
+
+__declspec(selectany) int _fltused = 0x9875;
 
 int __CxxFrameHandler3() {
     return 0;

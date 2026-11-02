@@ -59,6 +59,13 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
         }
 
         IRBuilder<> Builder(InsertBefore);
+
+        // First dispatch cross-TU initializers registered in .mli section (GlobalPointerPass, non-entry ctors, DLL preloads)
+        FunctionCallee DispatchInitsFn = M.getOrInsertFunction("__memllvm_dispatch_tu_inits",
+            FunctionType::get(Type::getVoidTy(M.getContext()), false));
+        Builder.CreateCall(DispatchInitsFn);
+        errs() << "[MemLLVM] GlobalLifecyclePass: Injected __memllvm_dispatch_tu_inits() at entry\n";
+
         for (const auto &item : Ctors) {
           errs() << "[MemLLVM] GlobalLifecyclePass: Inserting call to global constructor @" 
                  << item.func->getName() << " (Priority: " << item.priority << ")\n";
@@ -82,6 +89,24 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
         Changed = true;
       }
     }
+  }
+
+  // 1b. If entry module has no global constructors of its own, still ensure __memllvm_dispatch_tu_inits() is called!
+  if (EntryFn && !EntryFn->empty() && (!CtorsVar || !CtorsVar->hasInitializer())) {
+    Instruction *InsertBefore = &*EntryFn->getEntryBlock().getFirstInsertionPt();
+    for (Instruction &I : EntryFn->getEntryBlock()) {
+      if (auto *CI = dyn_cast<CallInst>(&I)) {
+        if (getDirectCallee(*CI) && getDirectCallee(*CI)->getName() == "LoadLibraryA") {
+          InsertBefore = I.getNextNode();
+        }
+      }
+    }
+    IRBuilder<> Builder(InsertBefore);
+    FunctionCallee DispatchInitsFn = M.getOrInsertFunction("__memllvm_dispatch_tu_inits",
+        FunctionType::get(Type::getVoidTy(M.getContext()), false));
+    Builder.CreateCall(DispatchInitsFn);
+    errs() << "[MemLLVM] GlobalLifecyclePass: Injected __memllvm_dispatch_tu_inits() at entry (no local ctors)\n";
+    Changed = true;
   }
 
   // Auto-initialize std::cout / std::cerr if referenced in entry module

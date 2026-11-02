@@ -137,6 +137,8 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
       continue;
     if (GV.getName().starts_with("llvm."))
       continue;
+    if (GV.getName().starts_with("__memllvm_init_slot_"))
+      continue;
 
     Constant *Init = GV.getInitializer();
     if (!Init)
