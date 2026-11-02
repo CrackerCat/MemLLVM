@@ -72,6 +72,17 @@ jobs:
             Write-Host "[+] $item"
           }
 
+      - name: Stage Plugin DLL at bin/ (MEMLLVM_DIR expects it there)
+        shell: pwsh
+        run: |
+          # The pass plugin flag is -fpass-plugin="$(MEMLLVM_DIR)bin\MemLLVM.dll"
+          # where MEMLLVM_DIR resolves to the repository root. Locally bin/ is a
+          # build output; on the runner the precommitted plugin lives in
+          # release_artifacts/, so stage a copy at the expected location.
+          New-Item -ItemType Directory -Path "bin" -Force | Out-Null
+          Copy-Item "release_artifacts/MemLLVM.dll" "bin/MemLLVM.dll" -Force
+          Write-Host "[+] Staged bin/MemLLVM.dll ($((Get-Item 'bin/MemLLVM.dll').Length) bytes)"
+
       - name: Build mimikatz (114 TUs through the MemLLVM pass)
         shell: pwsh
         run: |
