@@ -112,13 +112,72 @@ jobs:
           if-no-files-found: error
 
   # ------------------------------------------------------------------
-  # Job 2: verify precommitted artifacts, package SDK/tests/CSLoader
-  # source, and publish the GitHub release. Waits for the mimikatz
-  # build so the fresh .bin lands in the same release.
+  # Job 2: build official SQLite3 CLI flat binary from source on the runner.
+  # ------------------------------------------------------------------
+  build-sqlite:
+    name: Build SQLite3 Flat Binary
+    if: |
+      contains(github.event.head_commit.message, 'release') ||
+      contains(github.event.head_commit.message, 'Release') ||
+      contains(github.ref, 'release') ||
+      contains(github.ref, 'Release')
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Unpack Pinned Plugin-Compatible LLVM Toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = "C:\LLVM-22-plugin"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -Path "release_artifacts/clang-plugin-toolchain.zip" -DestinationPath $dest -Force
+          $cc = Join-Path $dest "bin\clang-cl.exe"
+          if (-not (Test-Path $cc)) { throw "clang-cl.exe missing after unpack" }
+          Add-Content $env:GITHUB_PATH (Join-Path $dest "bin")
+
+      - name: Stage Plugin DLL at bin/
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "bin" -Force | Out-Null
+          Copy-Item "release_artifacts/MemLLVM.dll" "bin/MemLLVM.dll" -Force
+          Write-Host "[+] Staged bin/MemLLVM.dll ($((Get-Item 'bin/MemLLVM.dll').Length) bytes)"
+
+      - name: Build SQLite3 CLI Flat Binary
+        shell: pwsh
+        run: |
+          python examples/sqlite/build_sqlite.py
+          if ($LASTEXITCODE -ne 0) { throw "build_sqlite.py failed with $LASTEXITCODE" }
+
+      - name: Verify SQLite3 Flat Binary
+        shell: pwsh
+        run: |
+          $bin = "examples/sqlite/sqlite3.bin"
+          if (-not (Test-Path $bin)) { throw "Flat binary was not produced: $bin" }
+          $size = (Get-Item $bin).Length
+          Write-Host "[+] sqlite3.bin: $size bytes"
+          if ($size -lt 50KB) { throw "Flat binary suspiciously small ($size bytes)" }
+
+      - name: Upload SQLite3 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3_bin
+          path: examples/sqlite/sqlite3.bin
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # Job 3: verify precommitted artifacts, package SDK/tests/CSLoader
+  # source, and publish the GitHub release. Waits for mimikatz and
+  # sqlite3 builds so the fresh .bin files land in the same release.
   # ------------------------------------------------------------------
   release:
     name: Build & Release Flat Binaries
-    needs: build-mimikatz
+    needs: [build-mimikatz, build-sqlite]
     if: |
       contains(github.event.head_commit.message, 'release') ||
       contains(github.event.head_commit.message, 'Release') ||
@@ -136,12 +195,19 @@ jobs:
           name: mimikatz_mllvm
           path: release_artifacts
 
+      - name: Download SQLite3 Flat Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sqlite3_bin
+          path: release_artifacts
+
       - name: Verify Release Artifacts
         shell: pwsh
         run: |
           $artifacts = @(
             "release_artifacts/MemLLVM.dll",
             "release_artifacts/mimikatz_mllvm.bin",
+            "release_artifacts/sqlite3.bin",
             "release_artifacts/box2d.bin",
             "release_artifacts/chip8.bin",
             "release_artifacts/doom.bin",
@@ -296,6 +362,7 @@ jobs:
               - `examples/`: Box2D, CHIP-8, DOOM, ImGui, SQLite and **mimikatz** (with full MemLLVM VS build config) example projects
             - **`MemLLVM-Tests.zip`**: Representative modern C and C++ test suite containing source `.cpp` files, compiled `.bin` flat binaries, batch verification scripts, and test assets
             - **`mimikatz_mllvm.bin`**: mimikatz 2.2.0 built **from source on the release runner** through the MemLLVM pass (114 translation units), standalone flat image, interactive mode working under pipe-based loaders
+            - **`sqlite3.bin`**: Official SQLite3 Command Line Shell (CLI) interactive flat binary built **from source on the release runner** through the MemLLVM pass, runnable in memory with full interactive stdio/console and pipe support
             - **`CSLoader-source.zip`**: CUI shellcode loader (CSLoader) **source code only** — not built by CI; build locally with Visual Studio
             - **`Tools/SCLoader.exe`**: Modern CUI-based GUI Shellcode & Payload Loader
             - **`box2d.bin`**: Erin Catto's Box2D 2D Rigid Body Physics Engine Flat Binary
@@ -308,6 +375,7 @@ jobs:
             MemLLVM-Tests.zip
             CSLoader-source.zip
             release_artifacts/mimikatz_mllvm.bin
+            release_artifacts/sqlite3.bin
             Tools/SCLoader.exe
             release_artifacts/box2d.bin
             release_artifacts/chip8.bin

@@ -16,11 +16,20 @@ def resolve_llvm_tool(tool_name):
             cand = os.path.join(base, f"{tool_name}.exe")
             if os.path.exists(cand):
                 return cand
-    if os.path.exists(rf"C:\LLVM-22-dev\bin\{tool_name}.exe"):
-        return rf"C:\LLVM-22-dev\bin\{tool_name}.exe"
+    for cand in [
+        rf"C:\LLVM-22-plugin\bin\{tool_name}.exe",
+        rf"C:\LLVM-22-dev\bin\{tool_name}.exe",
+        rf"C:\Program Files\LLVM\bin\{tool_name}.exe",
+    ]:
+        if os.path.exists(cand):
+            return cand
     w = shutil.which(tool_name) or shutil.which(f"{tool_name}.exe")
     if w:
         return w
+    if tool_name == "lld-link":
+        link = shutil.which("link") or shutil.which("link.exe")
+        if link:
+            return link
     print(f"[-] ERROR: Required tool '{tool_name}' not found!", file=sys.stderr)
     sys.exit(1)
 
@@ -104,6 +113,15 @@ def main():
     if res.returncode != 0:
         print("[-] Extracting flat binary failed!")
         return 1
+
+    # Copy to release_artifacts directory if present
+    rel_art_dst = os.path.join(REPO_ROOT, "release_artifacts", "sqlite3.bin")
+    if os.path.exists(os.path.dirname(rel_art_dst)):
+        try:
+            shutil.copy2(SQLITE_BIN, rel_art_dst)
+            print(f"[+] Also copied to {rel_art_dst}")
+        except Exception:
+            pass
 
     # Copy to SCLoader directory for easy access
     scloader_dst = r"E:\C++project\CUI\SCLoader\sqlite3.bin"
