@@ -175,8 +175,11 @@ echo [*] Compiling and running Test 12: std::fstream (ifstream, ofstream, std::l
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_fstream.cpp /Fo:D:\MemLLVM\tests\test_cpp_fstream.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_fstream.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_fstream.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_fstream.bin D:\MemLLVM\tests\test_cpp_fstream.exe
-rem Skip automated flat_run for cin/fstream
+if %ERRORLEVEL% neq 0 ( echo [-] Packing failed! & exit /b 1 )
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_fstream.bin 42
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 12 Status: %ERRORLEVEL%]
 
@@ -185,8 +188,10 @@ echo [*] Compiling and running Test 13: std::cin console stream input...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_cin.cpp /Fo:D:\MemLLVM\tests\test_cpp_cin.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_cin.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_cin.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_cin.bin D:\MemLLVM\tests\test_cpp_cin.exe
-rem Skip automated flat_run for cin/fstream
+if %ERRORLEVEL% neq 0 ( echo [-] Packing failed! & exit /b 1 )
+rem Interactive stdin test: skipped in automated non-interactive batch runner
 echo [Test 13 Status: %ERRORLEVEL%]
 
 echo.

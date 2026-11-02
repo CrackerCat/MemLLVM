@@ -12,20 +12,71 @@
 #pragma bss_seg(".data")
 #pragma data_seg(".data")
 
+struct _CRT_FILE_64 {
+    char* _ptr;
+    int   _cnt;
+    char* _base;
+    int   _flag;
+    int   _file;
+    int   _charbuf;
+    int   _bufsiz;
+    char* _tmpfname;
+};
+
+struct LtlFile {
+    _CRT_FILE_64 crt; // Offset 0 layout must match _CRT_FILE_64 for _get_stream_buffer_pointers
+    uint32_t magic;   // 0x4C544C46 ('LTLF')
+    HANDLE handle;
+    bool is_std;
+    int std_idx;      // 0 = stdin, 1 = stdout, 2 = stderr
+    bool own_handle;
+    bool eof;
+    bool error;
+    int unget_ch;     // -1 if none
+    wint_t unget_wch; // 0xFFFF if none
+};
+
+static LtlFile __ltl_stdin_file  = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 0, false, false, false, -1, 0xFFFF };
+static LtlFile __ltl_stdout_file = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 1, false, false, false, -1, 0xFFFF };
+static LtlFile __ltl_stderr_file = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 2, false, false, false, -1, 0xFFFF };
+
 static char __ltl_fake_stdin[16]  = { 0 };
 static char __ltl_fake_stdout[16] = { 0 };
 static char __ltl_fake_stderr[16] = { 0 };
 
-static HANDLE get_output_handle(void* stream) {
-    if (stream == __ltl_fake_stderr || stream == reinterpret_cast<void*>(2) || stream == reinterpret_cast<void*>(3)) {
+static HANDLE get_stream_handle(void* stream, bool for_write) {
+    if (!stream) {
+        return GetStdHandle(for_write ? STD_OUTPUT_HANDLE : STD_INPUT_HANDLE);
+    }
+    if (stream == reinterpret_cast<void*>(1) || stream == &__ltl_stdout_file || stream == __ltl_fake_stdout) {
+        return GetStdHandle(STD_OUTPUT_HANDLE);
+    }
+    if (stream == reinterpret_cast<void*>(2) || stream == reinterpret_cast<void*>(3) ||
+        stream == &__ltl_stderr_file || stream == __ltl_fake_stderr) {
         HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
         if (hErr && hErr != INVALID_HANDLE_VALUE) return hErr;
+        return GetStdHandle(STD_OUTPUT_HANDLE);
     }
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (!hOut || hOut == INVALID_HANDLE_VALUE) {
-        hOut = GetStdHandle(STD_ERROR_HANDLE);
+    if (stream == reinterpret_cast<void*>(0) || stream == &__ltl_stdin_file || stream == __ltl_fake_stdin) {
+        return GetStdHandle(STD_INPUT_HANDLE);
     }
-    return hOut;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf->magic == 0x4C544C46) {
+        if (lf->is_std) {
+            if (lf->std_idx == 0) return GetStdHandle(STD_INPUT_HANDLE);
+            if (lf->std_idx == 2) {
+                HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+                if (hErr && hErr != INVALID_HANDLE_VALUE) return hErr;
+            }
+            return GetStdHandle(STD_OUTPUT_HANDLE);
+        }
+        return lf->handle;
+    }
+    return GetStdHandle(for_write ? STD_OUTPUT_HANDLE : STD_INPUT_HANDLE);
+}
+
+static HANDLE get_output_handle(void* stream) {
+    return get_stream_handle(stream, true);
 }
 
 static void write_wide_to_handle(HANDLE h, const wchar_t* wstr, size_t wlen) {
@@ -837,57 +888,46 @@ static int format_narrow(NarrowSink& sink, const char* fmt, va_list ap) {
 extern "C" {
 
 void* __cdecl __acrt_iob_func(unsigned int idx) {
-    if (idx == 0) return __ltl_fake_stdin;
-    if (idx == 1) return __ltl_fake_stdout;
-    if (idx == 2) return __ltl_fake_stderr;
-    return __ltl_fake_stdout;
+    if (idx == 0) return &__ltl_stdin_file;
+    if (idx == 1) return &__ltl_stdout_file;
+    if (idx == 2) return &__ltl_stderr_file;
+    return &__ltl_stdout_file;
 }
 
-/* _fileno / _setmode —— 必须由 ltl 自己回答。
- *
- * CRT 初始化代码（以及常见的 kull_m_output_init 之类）会拿 stdout/stderr 去问
- * fd 号，再切成 _O_U8TEXT 文本模式。但 __acrt_iob_func 返回的是本文件里的哑
- * 结构，交给宿主 UCRT 的 _fileno 会被当成 FILE* 解引用，读出一个越界的垃圾 fd；
- * 紧接着 _setmode 对该 fd 做范围校验，走 _invalid_parameter 直接终止进程 ——
- * 表现就是「banner 一个字都没打出来，进程就没了」。
- *
- * 输出编码由 __stdio_common_vfwprintf 内部完成（UTF-16 -> UTF-8 -> WriteFile），
- * 不依赖 CRT 的文本模式，所以 _setmode 只需接受调用并如实回报旧模式。
- */
 int __cdecl _fileno(void* stream) {
-    if (stream == __ltl_fake_stdin)  return 0;
-    if (stream == __ltl_fake_stdout) return 1;
-    if (stream == __ltl_fake_stderr) return 2;
+    if (stream == &__ltl_stdin_file  || stream == __ltl_fake_stdin)  return 0;
+    if (stream == &__ltl_stdout_file || stream == __ltl_fake_stdout) return 1;
+    if (stream == &__ltl_stderr_file || stream == __ltl_fake_stderr) return 2;
+    if (!stream) return -1;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf->magic == 0x4C544C46) {
+        if (lf->is_std) return lf->std_idx;
+        return 3;
+    }
     return -1;
 }
 
 int __cdecl _setmode(int fd, int mode) {
     (void)fd;
     (void)mode;
-    return 0x4000; /* _O_TEXT：MSVC 下标准流的默认模式 */
+    return 0x4000; /* _O_TEXT: default text mode on MSVC */
 }
 
 void* __cdecl __p__iob(void) {
-    return __ltl_fake_stdout;
+    return &__ltl_stdout_file;
 }
 
 void* __cdecl __iob_func(void) {
-    return __ltl_fake_stdout;
+    return &__ltl_stdout_file;
 }
 
 int __cdecl fflush(void* stream) {
     HANDLE h = get_output_handle(stream);
 
-    /* 只对磁盘句柄真的去刷。
-     *
-     * ltl 的 stdio 没有用户态缓冲：每次 printf 都是直接 WriteFile 落到句柄，
-     * 所以 fflush 本身没有数据要刷；内核里唯一可能积压的是磁盘文件。
-     *
-     * 对管道调用 FlushFileBuffers 会一直阻塞到对端把数据全部读走。而加载器
-     * 的典型写法是「先 WaitForSingleObject 等 payload 线程结束，再去读管道」，
-     * 于是两边互相等待 —— payload 卡在 fflush 里退不出去，加载器卡在 wait 里
-     * 不来读，stdout 明明已经写进管道却谁也看不到。表现就是「打完 banner
-     * 就没反应」。控制台句柄同理，刷它没有任何意义。
+    /* Only flush actual disk files.
+     * ltl stdio has no user-space buffering; each printf writes directly via WriteFile.
+     * Calling FlushFileBuffers on pipes blocks until the reader drains the pipe, which
+     * causes deadlocks when a loader waits for thread exit before reading.
      */
     if (h && h != INVALID_HANDLE_VALUE && GetFileType(h) == FILE_TYPE_DISK) {
         FlushFileBuffers(h);
@@ -1087,26 +1127,394 @@ int __cdecl fputwc(wchar_t c, void* stream) {
     return c;
 }
 
+static bool parse_file_mode_a(const char* mode, DWORD& access, DWORD& creation, bool& append) {
+    if (!mode || !*mode) return false;
+    access = 0;
+    creation = 0;
+    append = false;
+    char m = mode[0];
+    bool plus = false;
+    for (const char* p = mode + 1; *p; ++p) {
+        if (*p == '+') plus = true;
+    }
+    if (m == 'r') {
+        access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ;
+        creation = OPEN_EXISTING;
+    } else if (m == 'w') {
+        access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_WRITE;
+        creation = CREATE_ALWAYS;
+    } else if (m == 'a') {
+        access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_WRITE;
+        creation = OPEN_ALWAYS;
+        append = true;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+static bool parse_file_mode_w(const wchar_t* mode, DWORD& access, DWORD& creation, bool& append) {
+    if (!mode || !*mode) return false;
+    access = 0;
+    creation = 0;
+    append = false;
+    wchar_t m = mode[0];
+    bool plus = false;
+    for (const wchar_t* p = mode + 1; *p; ++p) {
+        if (*p == L'+') plus = true;
+    }
+    if (m == L'r') {
+        access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ;
+        creation = OPEN_EXISTING;
+    } else if (m == L'w') {
+        access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_WRITE;
+        creation = CREATE_ALWAYS;
+    } else if (m == L'a') {
+        access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_WRITE;
+        creation = OPEN_ALWAYS;
+        append = true;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+void* __cdecl fopen(const char* filename, const char* mode) {
+    if (!filename || !mode) return nullptr;
+    DWORD access = 0, creation = 0;
+    bool append = false;
+    if (!parse_file_mode_a(mode, access, creation, append)) return nullptr;
+
+    HANDLE h = CreateFileA(filename, access, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           nullptr, creation, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return nullptr;
+
+    if (append) {
+        SetFilePointer(h, 0, nullptr, FILE_END);
+    }
+
+    HANDLE hHeap = GetProcessHeap();
+    LtlFile* lf = static_cast<LtlFile*>(HeapAlloc(hHeap, HEAP_ZERO_MEMORY, sizeof(LtlFile)));
+    if (!lf) {
+        CloseHandle(h);
+        return nullptr;
+    }
+    lf->magic = 0x4C544C46;
+    lf->handle = h;
+    lf->is_std = false;
+    lf->std_idx = -1;
+    lf->own_handle = true;
+    lf->eof = false;
+    lf->error = false;
+    lf->unget_ch = -1;
+    lf->unget_wch = 0xFFFF;
+    return lf;
+}
+
+void* __cdecl _wfopen(const wchar_t* filename, const wchar_t* mode) {
+    if (!filename || !mode) return nullptr;
+    DWORD access = 0, creation = 0;
+    bool append = false;
+    if (!parse_file_mode_w(mode, access, creation, append)) return nullptr;
+
+    HANDLE h = CreateFileW(filename, access, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           nullptr, creation, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return nullptr;
+
+    if (append) {
+        SetFilePointer(h, 0, nullptr, FILE_END);
+    }
+
+    HANDLE hHeap = GetProcessHeap();
+    LtlFile* lf = static_cast<LtlFile*>(HeapAlloc(hHeap, HEAP_ZERO_MEMORY, sizeof(LtlFile)));
+    if (!lf) {
+        CloseHandle(h);
+        return nullptr;
+    }
+    lf->magic = 0x4C544C46;
+    lf->handle = h;
+    lf->is_std = false;
+    lf->std_idx = -1;
+    lf->own_handle = true;
+    lf->eof = false;
+    lf->error = false;
+    lf->unget_ch = -1;
+    lf->unget_wch = 0xFFFF;
+    return lf;
+}
+
+int __cdecl fopen_s(void** pFile, const char* filename, const char* mode) {
+    if (!pFile) return 22; // EINVAL
+    *pFile = fopen(filename, mode);
+    return *pFile ? 0 : 2; // ENOENT
+}
+
+int __cdecl _wfopen_s(void** pFile, const wchar_t* filename, const wchar_t* mode) {
+    if (!pFile) return 22; // EINVAL
+    *pFile = _wfopen(filename, mode);
+    return *pFile ? 0 : 2;
+}
+
+int __cdecl fclose(void* stream) {
+    if (!stream) return -1;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf->magic != 0x4C544C46) return 0;
+    if (lf->is_std) return 0;
+    if (lf->own_handle && lf->handle && lf->handle != INVALID_HANDLE_VALUE) {
+        FlushFileBuffers(lf->handle);
+        CloseHandle(lf->handle);
+        lf->handle = INVALID_HANDLE_VALUE;
+    }
+    lf->magic = 0;
+    HeapFree(GetProcessHeap(), 0, lf);
+    return 0;
+}
+
+int __cdecl _fclose_nolock(void* stream) {
+    return fclose(stream);
+}
+
 size_t __cdecl fwrite(const void* buffer, size_t size, size_t count, void* stream) {
     if (!buffer || size == 0 || count == 0) return 0;
     HANDLE h = get_output_handle(stream);
+    if (!h || h == INVALID_HANDLE_VALUE) return 0;
     DWORD written = 0;
     size_t total = size * count;
-    WriteFile(h, buffer, static_cast<DWORD>(total), &written, nullptr);
-    return written / size;
+    if (WriteFile(h, buffer, static_cast<DWORD>(total), &written, nullptr)) {
+        return written / size;
+    }
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46) {
+        lf->error = true;
+    }
+    return 0;
+}
+
+size_t __cdecl _fwrite_nolock(const void* buffer, size_t size, size_t count, void* stream) {
+    return fwrite(buffer, size, count, stream);
 }
 
 size_t __cdecl fread(void* buffer, size_t size, size_t count, void* stream) {
-    (void)stream;
     if (!buffer || size == 0 || count == 0) return 0;
-    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE h = get_stream_handle(stream, false);
     if (!h || h == INVALID_HANDLE_VALUE) return 0;
-    DWORD bytesRead = 0;
-    size_t total = size * count;
-    if (ReadFile(h, buffer, static_cast<DWORD>(total), &bytesRead, nullptr)) {
-        return bytesRead / size;
+
+    LtlFile* lf = nullptr;
+    if (stream) {
+        LtlFile* candidate = reinterpret_cast<LtlFile*>(stream);
+        if (candidate->magic == 0x4C544C46) lf = candidate;
     }
+
+    size_t total = size * count;
+    DWORD bytesRead = 0;
+    size_t from_unget = 0;
+
+    if (lf && lf->unget_ch >= 0 && total > 0) {
+        reinterpret_cast<char*>(buffer)[0] = static_cast<char>(lf->unget_ch);
+        lf->unget_ch = -1;
+        from_unget = 1;
+        if (total == 1) return 1 / size;
+    }
+
+    if (ReadFile(h, reinterpret_cast<char*>(buffer) + from_unget,
+                 static_cast<DWORD>(total - from_unget), &bytesRead, nullptr)) {
+        size_t totalRead = bytesRead + from_unget;
+        if (totalRead < total && lf) {
+            lf->eof = true;
+        }
+        return totalRead / size;
+    }
+    if (lf) lf->error = true;
+    return from_unget / size;
+}
+
+size_t __cdecl _fread_nolock(void* buffer, size_t size, size_t count, void* stream) {
+    return fread(buffer, size, count, stream);
+}
+
+int __cdecl fgetc(void* stream) {
+    unsigned char ch = 0;
+    size_t n = fread(&ch, 1, 1, stream);
+    if (n == 1) return static_cast<int>(ch);
+    return -1; // EOF
+}
+
+char* __cdecl fgets(char* str, int num, void* stream) {
+    if (!str || num <= 0) return nullptr;
+    int idx = 0;
+    while (idx < num - 1) {
+        int c = fgetc(stream);
+        if (c == -1) {
+            if (idx == 0) return nullptr;
+            break;
+        }
+        str[idx++] = static_cast<char>(c);
+        if (c == '\n') break;
+    }
+    str[idx] = '\0';
+    return str;
+}
+
+wint_t __cdecl fgetwc(void* stream) {
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46 && lf->unget_wch != 0xFFFF) {
+        wint_t w = lf->unget_wch;
+        lf->unget_wch = 0xFFFF;
+        return w;
+    }
+    wchar_t wc = 0;
+    size_t n = fread(&wc, sizeof(wchar_t), 1, stream);
+    if (n == 1) return wc;
+    return 0xFFFF; // WEOF
+}
+
+int __cdecl ungetc(int c, void* stream) {
+    if (c == -1 || !stream) return -1;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46) {
+        lf->unget_ch = static_cast<unsigned char>(c);
+        lf->eof = false;
+        return c;
+    }
+    return -1;
+}
+
+wint_t __cdecl ungetwc(wint_t c, void* stream) {
+    if (c == 0xFFFF || !stream) return 0xFFFF;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46) {
+        lf->unget_wch = c;
+        lf->eof = false;
+        return c;
+    }
+    return 0xFFFF;
+}
+
+int __cdecl _fseeki64(void* stream, long long offset, int origin) {
+    HANDLE h = get_stream_handle(stream, false);
+    if (!h || h == INVALID_HANDLE_VALUE) return -1;
+    DWORD method = FILE_BEGIN;
+    if (origin == 1 /* SEEK_CUR */) method = FILE_CURRENT;
+    else if (origin == 2 /* SEEK_END */) method = FILE_END;
+
+    LARGE_INTEGER liOffset;
+    liOffset.QuadPart = offset;
+    LARGE_INTEGER liNew;
+    if (SetFilePointerEx(h, liOffset, &liNew, method)) {
+        LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+        if (lf && lf->magic == 0x4C544C46) {
+            lf->eof = false;
+            lf->unget_ch = -1;
+            lf->unget_wch = 0xFFFF;
+        }
+        return 0;
+    }
+    return -1;
+}
+
+int __cdecl fseek(void* stream, long offset, int origin) {
+    return _fseeki64(stream, offset, origin);
+}
+
+int __cdecl _fseek_nolock(void* stream, long offset, int origin) {
+    return fseek(stream, offset, origin);
+}
+
+int __cdecl _fseeki64_nolock(void* stream, long long offset, int origin) {
+    return _fseeki64(stream, offset, origin);
+}
+
+long long __cdecl _ftelli64(void* stream) {
+    HANDLE h = get_stream_handle(stream, false);
+    if (!h || h == INVALID_HANDLE_VALUE) return -1LL;
+    LARGE_INTEGER liZero;
+    liZero.QuadPart = 0;
+    LARGE_INTEGER liPos;
+    if (SetFilePointerEx(h, liZero, &liPos, FILE_CURRENT)) {
+        return liPos.QuadPart;
+    }
+    return -1LL;
+}
+
+long __cdecl ftell(void* stream) {
+    return static_cast<long>(_ftelli64(stream));
+}
+
+long __cdecl _ftell_nolock(void* stream) {
+    return ftell(stream);
+}
+
+long long __cdecl _ftelli64_nolock(void* stream) {
+    return _ftelli64(stream);
+}
+
+int __cdecl fgetpos(void* stream, long long* pos) {
+    if (!pos) return -1;
+    long long p = _ftelli64(stream);
+    if (p < 0) return -1;
+    *pos = p;
     return 0;
+}
+
+int __cdecl fsetpos(void* stream, const long long* pos) {
+    if (!pos) return -1;
+    return _fseeki64(stream, *pos, 0 /* SEEK_SET */);
+}
+
+void __cdecl clearerr(void* stream) {
+    if (!stream) return;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46) {
+        lf->eof = false;
+        lf->error = false;
+    }
+}
+
+void __cdecl rewind(void* stream) {
+    _fseeki64(stream, 0, 0 /* SEEK_SET */);
+    clearerr(stream);
+}
+
+int __cdecl feof(void* stream) {
+    if (!stream) return 0;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46) return lf->eof ? 1 : 0;
+    return 0;
+}
+
+int __cdecl ferror(void* stream) {
+    if (!stream) return 0;
+    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
+    if (lf && lf->magic == 0x4C544C46) return lf->error ? 1 : 0;
+    return 0;
+}
+
+int __cdecl setvbuf(void* stream, char* buffer, int mode, size_t size) {
+    (void)stream;
+    (void)buffer;
+    (void)mode;
+    (void)size;
+    return 0;
+}
+
+int __cdecl remove(const char* filename) {
+    if (!filename) return -1;
+    return DeleteFileA(filename) ? 0 : -1;
+}
+
+int __cdecl _wremove(const wchar_t* filename) {
+    if (!filename) return -1;
+    return DeleteFileW(filename) ? 0 : -1;
+}
+
+int __cdecl rename(const char* oldname, const char* newname) {
+    if (!oldname || !newname) return -1;
+    return MoveFileExA(oldname, newname, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
+}
+
+int __cdecl _wrename(const wchar_t* oldname, const wchar_t* newname) {
+    if (!oldname || !newname) return -1;
+    return MoveFileExW(oldname, newname, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
 }
 
 int __cdecl __stdio_common_vsscanf(

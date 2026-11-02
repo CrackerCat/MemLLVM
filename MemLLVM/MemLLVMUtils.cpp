@@ -101,6 +101,21 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "putchar" || Name == "putwchar" ||
       Name == "fputc" || Name == "fputwc" ||
       Name == "fwrite" || Name == "fread" ||
+      Name == "_fwrite_nolock" || Name == "_fread_nolock" ||
+      Name == "fopen" || Name == "_wfopen" ||
+      Name == "fopen_s" || Name == "_wfopen_s" ||
+      Name == "fclose" || Name == "_fclose_nolock" ||
+      Name == "fseek" || Name == "_fseeki64" ||
+      Name == "_fseek_nolock" || Name == "_fseeki64_nolock" ||
+      Name == "ftell" || Name == "_ftelli64" ||
+      Name == "_ftell_nolock" || Name == "_ftelli64_nolock" ||
+      Name == "fgetpos" || Name == "fsetpos" || Name == "rewind" ||
+      Name == "feof" || Name == "ferror" || Name == "clearerr" ||
+      Name == "fgetc" || Name == "fgets" || Name == "fgetwc" ||
+      Name == "ungetc" || Name == "ungetwc" ||
+      Name == "setvbuf" ||
+      Name == "remove" || Name == "_wremove" ||
+      Name == "rename" || Name == "_wrename" ||
       Name == "__iob_func" || Name == "__p__iob" ||
       Name == "__C_specific_handler" ||
       Name == "_fltused") {
