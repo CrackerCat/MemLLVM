@@ -141,7 +141,7 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 ### 坑点 3：LLVM 插件跨版本 C++ ABI 堆破坏崩溃（0xC0000374）
 * **诡异现象**：在本地编译好的 LLVM Pass 插件，放到官方发布的正式版 Clang-cl 中一挂载，在 Pass 注册瞬间直接触发 `STATUS_HEAP_CORRUPTION` 崩溃。
 * **真相大白**：LLVM 的 C++ 源码大量使用非 ABI 冻结的复杂模板与 STL 容器，编译器微小的优化选项差异（如 `/MD` vs `/MT`、迭代器调试等）就会导致插件与宿主 `clang-cl.exe` 析构时产生内存冲突。
-* **终极攻克**：我们在发布包中提供了一套完全二进制对齐的轻量编译器工具链（`release_artifacts/clang-plugin-toolchain.zip`），保证无论在任何开发者机器还是 GitHub CI 上都能 100% 稳定运行。
+* **终极攻克**：我们在 GitHub Releases 资源发布列表（`clang-plugin-toolchain.zip`）与仓库（`release_artifacts/clang-plugin-toolchain.zip`）中提供了一套完全二进制对齐的轻量编译器工具链，保证无论在任何开发者机器还是 GitHub CI 上都能 100% 稳定运行。
 
 ---
 

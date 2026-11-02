@@ -206,6 +206,7 @@ jobs:
         run: |
           $artifacts = @(
             "release_artifacts/MemLLVM.dll",
+            "release_artifacts/clang-plugin-toolchain.zip",
             "release_artifacts/mimikatz_mllvm.bin",
             "release_artifacts/sqlite3.bin",
             "release_artifacts/box2d.bin",
@@ -351,6 +352,7 @@ jobs:
             All application targets are standalone, self-relocating flat machine code images (.bin) runnable in memory.
 
             ### Release Assets:
+            - **`clang-plugin-toolchain.zip`**: Complete hermetic, binary-aligned Clang compiler toolchain (`clang-cl.exe` + builtin headers, LLVM 22.1.8 commit ca7933e4), guaranteed 100% ABI compatible with `MemLLVM.dll` out of the box
             - **`MemLLVM-SDK-windows-x64.zip`**: Complete SDK archive containing:
               - `setup_env.bat`: One-click environment variable setup & auto-updater (detects current directory, sets `MEMLLVM_DIR` and updates `PATH`; automatically migrates old paths on repeated runs in new locations)
               - `bin/`: `MemLLVM.dll` LLVM Pass Plugin
@@ -371,6 +373,7 @@ jobs:
             - **`doom1.wad`**: DOOM Shareware Game Data IWAD
             - **`imgui_demo.bin`**: Dear ImGui DirectX 11 Immediate-Mode GUI Flat Binary
           files: |
+            release_artifacts/clang-plugin-toolchain.zip
             MemLLVM-SDK-windows-x64.zip
             MemLLVM-Tests.zip
             CSLoader-source.zip

@@ -160,7 +160,7 @@ Building an out-of-tree LLVM pass plugin against LLVM header files and loading i
 LLVM's C++ codebase makes extensive use of STL containers (`std::vector`, `llvm::StringRef`, `llvm::SmallVector`) without an ABI freeze across builds. Even minor compiler flag differences (e.g. `/MT` vs `/MD`, debug iterators, MSVC version differences) corrupt memory when passing objects across DLL boundaries.
 
 #### The Breakthrough:
-We committed a pinned, hermetic plugin-compatible compiler toolchain (`release_artifacts/clang-plugin-toolchain.zip`) ensuring 100% binary compatibility on every developer machine and GitHub CI runner.
+We published and committed a pinned, hermetic plugin-compatible compiler toolchain (`clang-plugin-toolchain.zip` in GitHub Releases and `release_artifacts/`) ensuring 100% binary compatibility on every developer machine and GitHub CI runner.
 </details>
 
 <details>
