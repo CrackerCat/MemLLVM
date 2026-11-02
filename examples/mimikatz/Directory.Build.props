@@ -41,6 +41,8 @@
          \bin\MemLLVM.dll，插件根本加载不到。值自带尾反斜杠（来自 ..\..\），
          所以所有引用都写成 $(MEMLLVM_DIR)bin\... 形式（MEMLLVM_DIR 后不再加 \）。 -->
     <MEMLLVM_DIR Condition="'$(MEMLLVM_DIR)'==''">$(MSBuildThisFileDirectory)..\..\</MEMLLVM_DIR>
+    <!-- 自动补全尾部反斜杠：当 MEMLLVM_DIR 来自系统环境变量且不带斜杠时，确保拼接 bin\ 时路径合法 -->
+    <MEMLLVM_DIR Condition="'$(MEMLLVM_DIR)'!='' and !HasTrailingSlash('$(MEMLLVM_DIR)')">$(MEMLLVM_DIR)\</MEMLLVM_DIR>
     <!-- 插件开关：不定义它，下面那条 /clang:-fpass-plugin 的 Condition 永远不成立，
          构建照常"成功"但一个文件都没过插件 —— 这正是 VS 构建的 bin 一跑就崩的原因。
          这里默认打开；要编普通 PE 时在命令行 /p:EnableMemLLVM=false 覆盖。 -->
