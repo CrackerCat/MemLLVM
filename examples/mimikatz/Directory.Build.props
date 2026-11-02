@@ -34,15 +34,23 @@
     <!-- 三个路径属性都带条件默认值：本地开发机不改任何东西照常工作；
          CI（GitHub Actions）用 /p: 覆盖 LLVMInstallDir 和 MemLLVMPython 即可，
          MEMLLVM_DIR 自动按本文件所在目录推导，检出路径无关。 -->
-    <LLVMInstallDir Condition="'$(LLVMInstallDir)'==''">C:\LLVM-22-dev</LLVMInstallDir>
-    <LLVMToolsVersion>22</LLVMToolsVersion>
-    <!-- MemLLVM 源码仓根目录（本文件位于 <仓库根>\examples\mimikatz\，上跳两级）。
+    <!-- MemLLVM 源码仓/SDK 根目录：优先从环境变量读取，未设置则从工程目录推导上跳两级。
          文档里写作 $(MEMLLVM_DIR)\bin\MemLLVM.dll，这里必须真的定义出来，否则展开成
          \bin\MemLLVM.dll，插件根本加载不到。值自带尾反斜杠（来自 ..\..\），
          所以所有引用都写成 $(MEMLLVM_DIR)bin\... 形式（MEMLLVM_DIR 后不再加 \）。 -->
     <MEMLLVM_DIR Condition="'$(MEMLLVM_DIR)'==''">$(MSBuildThisFileDirectory)..\..\</MEMLLVM_DIR>
     <!-- 自动补全尾部反斜杠：当 MEMLLVM_DIR 来自系统环境变量且不带斜杠时，确保拼接 bin\ 时路径合法 -->
     <MEMLLVM_DIR Condition="'$(MEMLLVM_DIR)'!='' and !HasTrailingSlash('$(MEMLLVM_DIR)')">$(MEMLLVM_DIR)\</MEMLLVM_DIR>
+
+    <!-- LLVMInstallDir 自动侦测与绑定：
+         1. 环境变量或命令行已显式定义则优先使用
+         2. 自动检测 SDK 内置的 toolchain 目录 ($(MEMLLVM_DIR)toolchain)
+         3. 自动检测 SDK 根目录下的 bin\clang-cl.exe ($(MEMLLVM_DIR))
+         4. 回退至本机开发默认路径 C:\LLVM-22-dev -->
+    <LLVMInstallDir Condition="'$(LLVMInstallDir)'=='' and Exists('$(MEMLLVM_DIR)toolchain\bin\clang-cl.exe')">$(MEMLLVM_DIR)toolchain</LLVMInstallDir>
+    <LLVMInstallDir Condition="'$(LLVMInstallDir)'=='' and Exists('$(MEMLLVM_DIR)bin\clang-cl.exe')">$(MEMLLVM_DIR)</LLVMInstallDir>
+    <LLVMInstallDir Condition="'$(LLVMInstallDir)'==''">C:\LLVM-22-dev</LLVMInstallDir>
+    <LLVMToolsVersion>22</LLVMToolsVersion>
     <!-- 插件开关：不定义它，下面那条 /clang:-fpass-plugin 的 Condition 永远不成立，
          构建照常"成功"但一个文件都没过插件 —— 这正是 VS 构建的 bin 一跑就崩的原因。
          这里默认打开；要编普通 PE 时在命令行 /p:EnableMemLLVM=false 覆盖。 -->

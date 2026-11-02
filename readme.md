@@ -206,7 +206,8 @@ examples/
 2. Extract to any directory (e.g. `C:\MemLLVM`).
 3. **Double-click `setup_env.bat`**:
    - Automatically sets `MEMLLVM_DIR` in your User Environment.
-   - Mounts `bin` and `Tools` into your User `PATH`.
+   - **Auto-Binds Bundled Hermetic Toolchain**: Sets `LLVMInstallDir` to the SDK's embedded `toolchain/` directory so Visual Studio ClangCL automatically invokes the exact binary-aligned `clang-cl.exe`, eliminating host Clang ABI mismatches and plugin loading errors!
+   - Mounts `toolchain\bin`, `bin`, and `Tools` into your User `PATH`.
    - **Smart Path Migration**: Moving the SDK in the future? Just run `setup_env.bat` again in the new folder—it automatically purges old stale paths.
 
 ### 2. Enable Clang in Visual Studio

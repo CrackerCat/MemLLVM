@@ -191,12 +191,13 @@ examples/
 
 ## 🚀 极简上手使用指南
 
-### 第一步：一键配置 SDK 环境
+### 第一步：一键配置 SDK 环境（开箱即用）
 1. 前往 [GitHub Releases](https://github.com/Laster-dev/MemLLVM/releases) 下载最新的 `MemLLVM-SDK-windows-x64.zip`。
 2. 解压到本地任意目录（例如 `C:\MemLLVM`）。
 3. **直接双击运行目录下的 `setup_env.bat`**：
    - 自动检测并写入环境变量 `MEMLLVM_DIR`；
-   - 自动将 `bin` 和 `Tools` 挂载到用户 `PATH`；
+   - **自动绑定对齐的轻量编译器**：自动将 `LLVMInstallDir` 环境变量绑定至 SDK 内置的 `toolchain` 目录，使 Visual Studio 的 `ClangCL` 工具集自动调用完全二进制对齐的 `clang-cl.exe`，彻底避免第三方 Clang 造成的 ABI 崩溃或插件加载失败；
+   - 自动将 `toolchain\bin`、`bin` 和 `Tools` 挂载到用户 `PATH`，命令行直接可用 `clang-cl`；
    - **智能防冗余**：未来移动 SDK 到新目录，直接在新目录下再次双击即可自动迁移，绝不残留旧路径。
 
 ### 第二步：Visual Studio 启用 Clang

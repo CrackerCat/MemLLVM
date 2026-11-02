@@ -248,6 +248,11 @@ jobs:
           New-Item -ItemType Directory -Path "$sdk/Tools" -Force
           New-Item -ItemType Directory -Path "$sdk/src" -Force
           New-Item -ItemType Directory -Path "$sdk/examples" -Force
+          New-Item -ItemType Directory -Path "$sdk/toolchain" -Force
+
+          # 0. Embed hermetic plugin-compatible toolchain directly into SDK
+          Expand-Archive -Path "release_artifacts/clang-plugin-toolchain.zip" -DestinationPath "$sdk/toolchain" -Force
+          Write-Host "[+] Embedded clang-plugin-toolchain into $sdk/toolchain"
 
           # 1. bin & lib
           Copy-Item "release_artifacts/MemLLVM.dll" "$sdk/bin/" -Force
@@ -280,6 +285,7 @@ jobs:
           }
           Copy-Item "CMakeLists.txt" "$sdk/" -Force
           Copy-Item "readme.md" "$sdk/" -Force
+          Copy-Item "readme_zh.md" "$sdk/" -Force
           Copy-Item "setup_env.bat" "$sdk/" -Force
           Copy-Item "setup_env.ps1" "$sdk/" -Force
 
@@ -288,7 +294,7 @@ jobs:
 
           # 7. Compress into SDK zip package
           Compress-Archive -Path "$sdk/*" -DestinationPath "MemLLVM-SDK-windows-x64.zip" -Force
-          Write-Host "[+] Created MemLLVM-SDK-windows-x64.zip ($((Get-Item 'MemLLVM-SDK-windows-x64.zip').Length / 1024.0) KB)"
+          Write-Host "[+] Created MemLLVM-SDK-windows-x64.zip ($([math]::Round((Get-Item 'MemLLVM-SDK-windows-x64.zip').Length / 1MB, 2)) MB)"
 
       - name: Package Tests Distribution Archive
         shell: pwsh
@@ -352,9 +358,9 @@ jobs:
             All application targets are standalone, self-relocating flat machine code images (.bin) runnable in memory.
 
             ### Release Assets:
-            - **`clang-plugin-toolchain.zip`**: Complete hermetic, binary-aligned Clang compiler toolchain (`clang-cl.exe` + builtin headers, LLVM 22.1.8 commit ca7933e4), guaranteed 100% ABI compatible with `MemLLVM.dll` out of the box
-            - **`MemLLVM-SDK-windows-x64.zip`**: Complete SDK archive containing:
-              - `setup_env.bat`: One-click environment variable setup & auto-updater (detects current directory, sets `MEMLLVM_DIR` and updates `PATH`; automatically migrates old paths on repeated runs in new locations)
+            - **`MemLLVM-SDK-windows-x64.zip`**: Complete "all-in-one" SDK archive with embedded binary-aligned compiler toolchain:
+              - `setup_env.bat`: One-click environment setup (auto-binds `MEMLLVM_DIR`, sets `LLVMInstallDir` to embedded `toolchain/` for seamless Visual Studio integration, and adds `bin/`, `toolchain/bin/`, and `Tools/` to `PATH`)
+              - `toolchain/`: Embedded hermetic Clang compiler (`clang-cl.exe` + builtin headers, LLVM 22.1.8 commit ca7933e4, 100% ABI compatible with `MemLLVM.dll` out of the box)
               - `bin/`: `MemLLVM.dll` LLVM Pass Plugin
               - `lib/`: `MemLLVM.lib` import library and `ltl.lib` freestanding runtime
               - `include/`: Pass headers & API definitions
@@ -362,6 +368,7 @@ jobs:
               - `Tools/`: `SCLoader.exe` interactive GUI payload runner & debugger
               - `src/`: Complete C++ source code of all LLVM passes
               - `examples/`: Box2D, CHIP-8, DOOM, ImGui, SQLite and **mimikatz** (with full MemLLVM VS build config) example projects
+            - **`clang-plugin-toolchain.zip`**: Standalone download of the hermetic Clang compiler toolchain
             - **`MemLLVM-Tests.zip`**: Representative modern C and C++ test suite containing source `.cpp` files, compiled `.bin` flat binaries, batch verification scripts, and test assets
             - **`mimikatz_mllvm.bin`**: mimikatz 2.2.0 built **from source on the release runner** through the MemLLVM pass (114 translation units), standalone flat image, interactive mode working under pipe-based loaders
             - **`sqlite3.bin`**: Official SQLite3 Command Line Shell (CLI) interactive flat binary built **from source on the release runner** through the MemLLVM pass, runnable in memory with full interactive stdio/console and pipe support
