@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Directory.Build.targets（在 vcxproj 之后导入，这里写的属性会覆盖工程文件）
+
+  解决三件事，缺一不可：
+
+  1. 工具集。mimikatz.vcxproj 的 PlatformToolset 是无条件 v141（写在
+     ClangCL 条目之后，后写的赢），所以 Directory.Build.props 里所有
+     ClangCL 条件段从来没生效过 —— 插件根本没跑，obj 里全是未重写的
+     __imp_* 导入，抽出来的 bin 一调 API 就崩。targets 在 vcxproj 之后
+     导入，这里的 PlatformToolset 能覆盖它。
+
+  2. /GL。工程里 WholeProgramOptimization=true。ClangCL 工具集会把它翻成
+     -flto：代码生成推迟到链接期，per-TU 跑的 pass 插件等于被完全绕过。
+     必须关掉。
+
+  3. 扁平链接。插件处理过的 obj 完全没有 CRT/Win32 导入，只能按
+     /nodefaultlib + ltl.lib + 项目 .min.lib 的方式链接（link_flat.bat 的
+     同款参数）。这里直接把 Link 配置改掉，让 VS 自己完成扁平链接，
+     链完再用 extract_flat_bin.py 抽出可加载的 .bin。
+     常规链接（带默认 CRT）在这种 obj 上必然报大量未解析符号，不要尝试。
+
+  生效范围刻意收窄：只有 mimikatz 主工程的 Release|x64 且
+  EnableMemLLVM=true 时才接管。Debug 和其它子工程（mimilib/mimidrv/...）
+  保持上游原样。
+-->
+<Project>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)'=='mimikatz' and '$(Configuration)|$(Platform)'=='Release|x64' and '$(EnableMemLLVM)'=='true'">
+    <PlatformToolset>ClangCL</PlatformToolset>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <GenerateManifest>false</GenerateManifest>
+    <FlatLinkOptions>/nodefaultlib /entry:main /dynamicbase /nxcompat /safeseh:no /opt:ref /opt:icf /pdb:none /incremental:no</FlatLinkOptions>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup Condition="'$(MSBuildProjectName)'=='mimikatz' and '$(Configuration)|$(Platform)'=='Release|x64' and '$(EnableMemLLVM)'=='true'">
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <!-- 扁平镜像不需要延迟加载；DelayLoadDLLs 会让 VS 自动拖入 Delayimp.lib，
+           它在 /nodefaultlib 环境下引用不存在的 _load_config_used 和 CFG 表。 -->
+      <DelayLoadDLLs></DelayLoadDLLs>
+      <!-- 与 build/link_flat.bat 完全同一组参数。/entry:main 必须显式给：
+           pass 生成的 main（TU init 分发器）和源码的 wmain 并存，
+           不指定入口 lld-link 会报 "found both wmain and main"。 -->
+      <AdditionalOptions>$(FlatLinkOptions) %(AdditionalOptions)</AdditionalOptions>
+      <!-- 注意结尾不带 %(AdditionalDependencies)：工具集默认把 kernel32.lib 等
+           系统导入库塞进来，任何漏改写的导入都会被静默解析成导入表 ——
+           那种 PE 抽成 bin 一调 API 就崩。去掉后，漏网导入会变成
+           链接期硬错误，问题在构建时就暴露。 -->
+      <!-- uuid/wbemuuid/MsXml2 只写文件名：链接器从 MSBuild 的 LIB 搜索路径
+              （LibraryPath，随每台机器的 SDK 版本变化）找到它们，不能硬编码 SDK 绝对路径。
+              注意结尾不带 %(AdditionalDependencies)：工具集默认把 kernel32.lib 等
+              系统导入库塞进来，任何漏改写的导入都会被静默解析成导入表 ——
+              那种 PE 抽成 bin 一调 API 就崩。去掉后，漏网导入会变成
+              链接期硬错误，问题在构建时就暴露。 -->
+      <AdditionalDependencies>$(MEMLLVM_DIR)ltl\ltl.lib;$(SolutionDir)lib\x64\msasn1.min.lib;$(SolutionDir)lib\x64\ntdll.min.lib;$(SolutionDir)lib\x64\netapi32.min.lib;$(SolutionDir)lib\x64\advapi32.hash.lib;uuid.lib;wbemuuid.lib;MsXml2.Lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- 链接成功后抽扁平镜像。产物：x64\mimikatz_mllvm.bin -->
+  <Target Name="MemLLVMPackFlatBin"
+          AfterTargets="Build"
+          Condition="'$(MSBuildProjectName)'=='mimikatz' and '$(Configuration)|$(Platform)'=='Release|x64' and '$(EnableMemLLVM)'=='true' and '$(DesignTimeBuild)'!='true'">
+    <Message Importance="high" Text="[MemLLVM] packing flat image from $(OutDir)mimikatz.exe" />
+    <Exec Command="&quot;$(MemLLVMPython)&quot; &quot;$(SolutionDir)build\extract_flat_bin.py&quot; &quot;$(OutDir)mimikatz.exe&quot; &quot;$(OutDir)mimikatz_mllvm.bin&quot;" />
+  </Target>
+
+</Project>

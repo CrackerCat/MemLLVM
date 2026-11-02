@@ -9,8 +9,13 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & Release Flat Binaries
+  # ------------------------------------------------------------------
+  # Job 1: build the mimikatz flat binary from source on the runner.
+  # Requires: pinned LLVM 22.1.8 (pass plugin ABI), the precommitted
+  # MemLLVM.dll plugin, ltl/ltl.lib and examples/mimikatz/lib/x64/*.lib.
+  # ------------------------------------------------------------------
+  build-mimikatz:
+    name: Build mimikatz Flat Binary
     if: |
       contains(github.event.head_commit.message, 'release') ||
       contains(github.event.head_commit.message, 'Release') ||
@@ -22,11 +27,115 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install LLVM 22.1.8 (must match the pass plugin ABI)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = '22.1.8'
+          # Official asset names changed across LLVM releases; try both.
+          $candidates = @(
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-$ver/LLVM-$ver-Windows-X64.exe",
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-$ver/LLVM-$ver-win64.exe"
+          )
+          $installer = "$env:RUNNER_TEMP\llvm-installer.exe"
+          $downloaded = $false
+          foreach ($url in $candidates) {
+            try {
+              Write-Host "Downloading $url"
+              Invoke-WebRequest -Uri $url -OutFile $installer -MaximumRedirection 10
+              $downloaded = $true
+              break
+            } catch {
+              Write-Host "  not found, trying next candidate"
+            }
+          }
+          if (-not $downloaded) { throw "Could not download LLVM $ver from any known URL" }
+          # NSIS silent install
+          Start-Process -FilePath $installer -ArgumentList '/S' -Wait
+          $clang = "C:\Program Files\LLVM\bin\clang-cl.exe"
+          if (-not (Test-Path $clang)) { throw "clang-cl.exe not found after installation" }
+          $v = & $clang --version | Select-Object -First 1
+          Write-Host "[+] Installed: $v"
+          if ($v -notlike "*$ver*") { throw "LLVM version mismatch: expected $ver, got $v" }
+          Add-Content $env:GITHUB_PATH "C:\Program Files\LLVM\bin"
+
+      - name: Verify Plugin & Runtime Are Present
+        shell: pwsh
+        run: |
+          foreach ($item in @("release_artifacts/MemLLVM.dll", "ltl/ltl.lib",
+                              "examples/mimikatz/lib/x64/msasn1.min.lib",
+                              "examples/mimikatz/build/build_vs_release.bat")) {
+            if (-not (Test-Path $item)) { throw "Missing required input: $item" }
+            Write-Host "[+] $item"
+          }
+
+      - name: Build mimikatz (114 TUs through the MemLLVM pass)
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          $proj = Join-Path $root "examples\mimikatz"
+          # /p: overrides exist because Directory.Build.props carries local-machine
+          # defaults: LLVMInstallDir (CI installs to Program Files) and
+          # MemLLVMPython (the runner's python is on PATH). MEMLLVM_DIR is
+          # derived from the props file location, so no override is needed.
+          msbuild "examples\mimikatz\mimikatz\mimikatz.vcxproj" `
+            /p:Configuration=Release /p:Platform=x64 `
+            "/p:SolutionDir=$proj\" `
+            "/p:LLVMInstallDir=C:\Program Files\LLVM" `
+            /p:MemLLVMPython=python `
+            /m /v:m /nologo
+          if ($LASTEXITCODE -ne 0) { throw "msbuild failed with $LASTEXITCODE" }
+
+      - name: Verify Flat Binary
+        shell: pwsh
+        run: |
+          $bin = "examples/mimikatz/x64/mimikatz_mllvm.bin"
+          if (-not (Test-Path $bin)) { throw "Flat binary was not produced: $bin" }
+          $size = (Get-Item $bin).Length
+          Write-Host "[+] mimikatz_mllvm.bin: $size bytes"
+          if ($size -lt 1MB) { throw "Flat binary suspiciously small ($size bytes)" }
+
+      - name: Upload mimikatz Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimikatz_mllvm
+          path: examples/mimikatz/x64/mimikatz_mllvm.bin
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # Job 2: verify precommitted artifacts, package SDK/tests/CSLoader
+  # source, and publish the GitHub release. Waits for the mimikatz
+  # build so the fresh .bin lands in the same release.
+  # ------------------------------------------------------------------
+  release:
+    name: Build & Release Flat Binaries
+    needs: build-mimikatz
+    if: |
+      contains(github.event.head_commit.message, 'release') ||
+      contains(github.event.head_commit.message, 'Release') ||
+      contains(github.ref, 'release') ||
+      contains(github.ref, 'Release')
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download mimikatz Flat Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: mimikatz_mllvm
+          path: release_artifacts
+
       - name: Verify Release Artifacts
         shell: pwsh
         run: |
           $artifacts = @(
             "release_artifacts/MemLLVM.dll",
+            "release_artifacts/mimikatz_mllvm.bin",
             "release_artifacts/box2d.bin",
             "release_artifacts/chip8.bin",
             "release_artifacts/doom.bin",
@@ -101,7 +210,7 @@ jobs:
           Copy-Item "setup_env.bat" "$sdk/" -Force
           Copy-Item "setup_env.ps1" "$sdk/" -Force
 
-          # 6. Examples
+          # 6. Examples (mimikatz source + MemLLVM build config included)
           Copy-Item -Recurse "examples/*" "$sdk/examples/" -Force
 
           # 7. Compress into SDK zip package
@@ -112,10 +221,10 @@ jobs:
         shell: pwsh
         run: |
           $tempDir = "temp_tests_pkg/tests"
-          if (Test-Path "temp_tests_pkg") { Remove-Item -Recurse -Force "temp_tests_pkg" }
+          if (Test-Path "temp_tests_pkg") { Remove-Item -Recurse -Force $tempDir }
           New-Item -ItemType Directory -Path $tempDir -Force
 
-          $files = Get-ChildItem "tests" -File | Where-Object { 
+          $files = Get-ChildItem "tests" -File | Where-Object {
             $_.Extension -in @(".cpp", ".c", ".bin", ".bat", ".h", ".txt") -and
             $_.Name -notmatch '\.ll$' -and $_.Name -notmatch '\.pcm$'
           }
@@ -125,8 +234,25 @@ jobs:
           }
 
           Compress-Archive -Path "temp_tests_pkg/*" -DestinationPath "MemLLVM-Tests.zip" -Force
-          Remove-Item -Recurse -Force "temp_tests_pkg"
+          Remove-Item -Recurse -Force $tempDir
           Write-Host "[+] Created MemLLVM-Tests.zip ($([math]::Round((Get-Item 'MemLLVM-Tests.zip').Length / 1024.0, 2)) KB)"
+
+      - name: Package CSLoader Source Archive
+        shell: pwsh
+        run: |
+          # CSLoader ships as source only (no CI build): the CUI shellcode
+          # loader project, built locally with VS. Strip the stale binary.
+          $tempDir = "temp_csloader/CSLoader"
+          if (Test-Path "temp_csloader") { Remove-Item -Recurse -Force "temp_csloader" }
+          New-Item -ItemType Directory -Path $tempDir -Force
+          Copy-Item "CSLoader/*.cpp" $tempDir -Force
+          Copy-Item "CSLoader/*.h" $tempDir -Force
+          Copy-Item "CSLoader/*.asm" $tempDir -Force
+          Copy-Item "CSLoader/*.vcxproj" $tempDir -ErrorAction SilentlyContinue
+          Copy-Item "CSLoader/*.sln" $tempDir -ErrorAction SilentlyContinue
+          Compress-Archive -Path "temp_csloader/*" -DestinationPath "CSLoader-source.zip" -Force
+          Remove-Item -Recurse -Force "temp_csloader"
+          Write-Host "[+] Created CSLoader-source.zip ($([math]::Round((Get-Item 'CSLoader-source.zip').Length / 1024.0, 2)) KB)"
 
       - name: Generate Release Tag & Date
         id: release_info
@@ -156,13 +282,15 @@ jobs:
             - **`MemLLVM-SDK-windows-x64.zip`**: Complete SDK archive containing:
               - `setup_env.bat`: One-click environment variable setup & auto-updater (detects current directory, sets `MEMLLVM_DIR` and updates `PATH`; automatically migrates old paths on repeated runs in new locations)
               - `bin/`: `MemLLVM.dll` LLVM Pass Plugin
-              - `lib/`: `MemLLVM.lib` import library
+              - `lib/`: `MemLLVM.lib` import library and `ltl.lib` freestanding runtime
               - `include/`: Pass headers & API definitions
               - `ltl/`: Freestanding C/C++ runtime headers and `ltl.lib`
               - `Tools/`: `SCLoader.exe` interactive GUI payload runner & debugger
               - `src/`: Complete C++ source code of all LLVM passes
-              - `examples/`: Box2D, CHIP-8, DOOM, ImGui full example projects
+              - `examples/`: Box2D, CHIP-8, DOOM, ImGui, SQLite and **mimikatz** (with full MemLLVM VS build config) example projects
             - **`MemLLVM-Tests.zip`**: Representative modern C and C++ test suite containing source `.cpp` files, compiled `.bin` flat binaries, batch verification scripts, and test assets
+            - **`mimikatz_mllvm.bin`**: mimikatz 2.2.0 built **from source on the release runner** through the MemLLVM pass (114 translation units), standalone flat image, interactive mode working under pipe-based loaders
+            - **`CSLoader-source.zip`**: CUI shellcode loader (CSLoader) **source code only** — not built by CI; build locally with Visual Studio
             - **`Tools/SCLoader.exe`**: Modern CUI-based GUI Shellcode & Payload Loader
             - **`box2d.bin`**: Erin Catto's Box2D 2D Rigid Body Physics Engine Flat Binary
             - **`chip8.bin`**: Full CHIP-8 CPU / Sound Virtual Machine Flat Binary
@@ -172,6 +300,8 @@ jobs:
           files: |
             MemLLVM-SDK-windows-x64.zip
             MemLLVM-Tests.zip
+            CSLoader-source.zip
+            release_artifacts/mimikatz_mllvm.bin
             Tools/SCLoader.exe
             release_artifacts/box2d.bin
             release_artifacts/chip8.bin

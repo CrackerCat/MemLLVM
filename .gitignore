@@ -84,3 +84,27 @@ $RECYCLE.BIN/
 
 *.zip
 
+
+# ==========================================
+# mimikatz example & CSLoader exceptions
+# ==========================================
+# build scripts must be tracked even though build/ dirs are ignored
+!examples/mimikatz/build/
+examples/mimikatz/build/*
+!examples/mimikatz/build/*.bat
+!examples/mimikatz/build/*.py
+!examples/mimikatz/build/sim_scloader.c
+!examples/mimikatz/build/probe_loader.c
+# prebuilt import libraries required by the flat link (no system CRT)
+!examples/mimikatz/lib/
+!examples/mimikatz/lib/**
+# static freestanding runtime linked into every payload
+!ltl/ltl.lib
+# inline asm source for CSLoader
+!CSLoader/CallShellcode.asm
+# per-project intermediate dirs (rebuilt from scratch on CI)
+examples/mimikatz/mimikatz/x64/
+examples/mimikatz/mimilib/x64/
+examples/mimikatz/mimilove/x64/
+examples/mimikatz/mimispool/x64/
+examples/mimikatz/Win32/
