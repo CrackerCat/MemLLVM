@@ -34,11 +34,12 @@ struct LtlFile {
     bool error;
     int unget_ch;     // -1 if none
     wint_t unget_wch; // 0xFFFF if none
+    bool is_binary;
 };
 
-static LtlFile __ltl_stdin_file  = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 0, false, false, false, -1, 0xFFFF };
-static LtlFile __ltl_stdout_file = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 1, false, false, false, -1, 0xFFFF };
-static LtlFile __ltl_stderr_file = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 2, false, false, false, -1, 0xFFFF };
+static LtlFile __ltl_stdin_file  = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 0, false, false, false, -1, 0xFFFF, false };
+static LtlFile __ltl_stdout_file = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 1, false, false, false, -1, 0xFFFF, false };
+static LtlFile __ltl_stderr_file = { { 0 }, 0x4C544C46, INVALID_HANDLE_VALUE, true, 2, false, false, false, -1, 0xFFFF, false };
 
 static char __ltl_fake_stdin[16]  = { 0 };
 static char __ltl_fake_stdout[16] = { 0 };
@@ -1139,15 +1140,17 @@ wint_t __cdecl fputwc(wchar_t c, void* stream) {
     return c;
 }
 
-static bool parse_file_mode_a(const char* mode, DWORD& access, DWORD& creation, bool& append) {
+static bool parse_file_mode_a(const char* mode, DWORD& access, DWORD& creation, bool& append, bool& is_binary) {
     if (!mode || !*mode) return false;
     access = 0;
     creation = 0;
     append = false;
+    is_binary = false;
     char m = mode[0];
     bool plus = false;
     for (const char* p = mode + 1; *p; ++p) {
         if (*p == '+') plus = true;
+        if (*p == 'b') is_binary = true;
     }
     if (m == 'r') {
         access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ;
@@ -1165,15 +1168,17 @@ static bool parse_file_mode_a(const char* mode, DWORD& access, DWORD& creation, 
     return true;
 }
 
-static bool parse_file_mode_w(const wchar_t* mode, DWORD& access, DWORD& creation, bool& append) {
+static bool parse_file_mode_w(const wchar_t* mode, DWORD& access, DWORD& creation, bool& append, bool& is_binary) {
     if (!mode || !*mode) return false;
     access = 0;
     creation = 0;
     append = false;
+    is_binary = false;
     wchar_t m = mode[0];
     bool plus = false;
     for (const wchar_t* p = mode + 1; *p; ++p) {
         if (*p == L'+') plus = true;
+        if (*p == L'b') is_binary = true;
     }
     if (m == L'r') {
         access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ;
@@ -1195,7 +1200,8 @@ void* __cdecl fopen(const char* filename, const char* mode) {
     if (!filename || !mode) return nullptr;
     DWORD access = 0, creation = 0;
     bool append = false;
-    if (!parse_file_mode_a(mode, access, creation, append)) return nullptr;
+    bool is_binary = false;
+    if (!parse_file_mode_a(mode, access, creation, append, is_binary)) return nullptr;
 
     HANDLE h = CreateFileA(filename, access, FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr, creation, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -1220,6 +1226,7 @@ void* __cdecl fopen(const char* filename, const char* mode) {
     lf->error = false;
     lf->unget_ch = -1;
     lf->unget_wch = 0xFFFF;
+    lf->is_binary = is_binary;
     return lf;
 }
 
@@ -1227,7 +1234,8 @@ void* __cdecl _wfopen(const wchar_t* filename, const wchar_t* mode) {
     if (!filename || !mode) return nullptr;
     DWORD access = 0, creation = 0;
     bool append = false;
-    if (!parse_file_mode_w(mode, access, creation, append)) return nullptr;
+    bool is_binary = false;
+    if (!parse_file_mode_w(mode, access, creation, append, is_binary)) return nullptr;
 
     HANDLE h = CreateFileW(filename, access, FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr, creation, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -1252,6 +1260,7 @@ void* __cdecl _wfopen(const wchar_t* filename, const wchar_t* mode) {
     lf->error = false;
     lf->unget_ch = -1;
     lf->unget_wch = 0xFFFF;
+    lf->is_binary = is_binary;
     return lf;
 }
 
@@ -1345,10 +1354,37 @@ size_t __cdecl _fread_nolock(void* buffer, size_t size, size_t count, void* stre
 }
 
 int __cdecl fgetc(void* stream) {
+    LtlFile* lf = nullptr;
+    if (stream) {
+        LtlFile* candidate = reinterpret_cast<LtlFile*>(stream);
+        if (candidate->magic == 0x4C544C46) lf = candidate;
+    } else {
+        lf = &__ltl_stdin_file;
+    }
+    if (lf && lf->unget_ch >= 0) {
+        int c = lf->unget_ch;
+        lf->unget_ch = -1;
+        return c;
+    }
+
+    HANDLE h = get_stream_handle(stream, false);
+    if (!h || h == INVALID_HANDLE_VALUE) return -1;
+
     unsigned char ch = 0;
     size_t n = fread(&ch, 1, 1, stream);
-    if (n == 1) return static_cast<int>(ch);
-    return -1; // EOF
+    if (n != 1) return -1;
+
+    // In text mode, translate \r\n to \n
+    if (ch == '\r' && (!lf || !lf->is_binary)) {
+        unsigned char next = 0;
+        size_t n2 = fread(&next, 1, 1, stream);
+        if (n2 == 1) {
+            if (next == '\n') return '\n';
+            if (lf) lf->unget_ch = next;
+        }
+        return '\n';
+    }
+    return static_cast<int>(ch);
 }
 
 char* __cdecl fgets(char* str, int num, void* stream) {
@@ -1367,17 +1403,109 @@ char* __cdecl fgets(char* str, int num, void* stream) {
     return str;
 }
 
+char* __cdecl _fgets_nolock(char* str, int num, void* stream) {
+    return fgets(str, num, stream);
+}
+
 wint_t __cdecl fgetwc(void* stream) {
-    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
-    if (lf && lf->magic == 0x4C544C46 && lf->unget_wch != 0xFFFF) {
+    LtlFile* lf = nullptr;
+    if (stream) {
+        LtlFile* candidate = reinterpret_cast<LtlFile*>(stream);
+        if (candidate->magic == 0x4C544C46) lf = candidate;
+    } else {
+        lf = &__ltl_stdin_file;
+    }
+
+    if (lf && lf->unget_wch != 0xFFFF) {
         wint_t w = lf->unget_wch;
         lf->unget_wch = 0xFFFF;
         return w;
     }
+
+    HANDLE h = get_stream_handle(stream, false);
+    if (!h || h == INVALID_HANDLE_VALUE) return 0xFFFF;
+
+    // 1. Interactive Windows console (ReadConsoleW returns actual UTF-16 characters)
+    DWORD cMode = 0;
+    if (GetFileType(h) == FILE_TYPE_CHAR && GetConsoleMode(h, &cMode)) {
+        wchar_t wc = 0;
+        DWORD charsRead = 0;
+        if (!ReadConsoleW(h, &wc, 1, &charsRead, nullptr) || charsRead == 0) {
+            if (lf) lf->eof = true;
+            return 0xFFFF; // WEOF
+        }
+        if (wc == L'\r') {
+            wchar_t next = 0;
+            DWORD nRead = 0;
+            if (ReadConsoleW(h, &next, 1, &nRead, nullptr) && nRead > 0) {
+                if (next == L'\n') return L'\n';
+                if (lf) lf->unget_wch = next;
+            }
+            return L'\n';
+        }
+        return wc;
+    }
+
+    // 2. Standard streams (pipes, redirection) deliver ANSI/UTF-8 byte stream, NOT raw 16-bit wchar_t
+    if (!lf || lf->is_std) {
+        unsigned char b = 0;
+        DWORD bytesRead = 0;
+        size_t from_unget = 0;
+        if (lf && lf->unget_ch >= 0) {
+            b = static_cast<unsigned char>(lf->unget_ch);
+            lf->unget_ch = -1;
+            from_unget = 1;
+        }
+        if (from_unget == 0) {
+            if (!ReadFile(h, &b, 1, &bytesRead, nullptr) || bytesRead == 0) {
+                if (lf) lf->eof = true;
+                return 0xFFFF;
+            }
+        }
+        if (b == '\r') {
+            unsigned char next = 0;
+            DWORD n2 = 0;
+            if (ReadFile(h, &next, 1, &n2, nullptr) && n2 > 0) {
+                if (next == '\n') return L'\n';
+                if (lf) lf->unget_ch = next;
+            }
+            return L'\n';
+        }
+        if (b <= 0x7F) {
+            return static_cast<wint_t>(b);
+        }
+        if ((b & 0xE0) == 0xC0) {
+            unsigned char b2 = 0;
+            DWORD r2 = 0;
+            if (ReadFile(h, &b2, 1, &r2, nullptr) && r2 == 1) {
+                return static_cast<wint_t>(((b & 0x1F) << 6) | (b2 & 0x3F));
+            }
+        } else if ((b & 0xF0) == 0xE0) {
+            unsigned char buf2[2] = {0};
+            DWORD r2 = 0;
+            if (ReadFile(h, buf2, 2, &r2, nullptr) && r2 == 2) {
+                return static_cast<wint_t>(((b & 0x0F) << 12) | ((buf2[0] & 0x3F) << 6) | (buf2[1] & 0x3F));
+            }
+        }
+        return static_cast<wint_t>(b);
+    }
+
+    // 3. Disk file (!lf->is_std): read raw wchar_t
     wchar_t wc = 0;
     size_t n = fread(&wc, sizeof(wchar_t), 1, stream);
-    if (n == 1) return wc;
-    return 0xFFFF; // WEOF
+    if (n == 1) {
+        if (wc == L'\r' && !lf->is_binary) {
+            wchar_t next = 0;
+            size_t n2 = fread(&next, sizeof(wchar_t), 1, stream);
+            if (n2 == 1) {
+                if (next == L'\n') return L'\n';
+                if (lf) lf->unget_wch = next;
+            }
+            return L'\n';
+        }
+        return wc;
+    }
+    return 0xFFFF;
 }
 
 wchar_t* __cdecl fgetws(wchar_t* str, int num, void* stream) {
@@ -1394,6 +1522,10 @@ wchar_t* __cdecl fgetws(wchar_t* str, int num, void* stream) {
     }
     str[idx] = L'\0';
     return str;
+}
+
+wchar_t* __cdecl _fgetws_nolock(wchar_t* str, int num, void* stream) {
+    return fgetws(str, num, stream);
 }
 
 int __cdecl getc(void* stream) { return fgetc(stream); }
@@ -1416,9 +1548,15 @@ int __cdecl getchar(void) { return fgetc(&__ltl_stdin_file); }
 wint_t __cdecl getwchar(void) { return fgetwc(&__ltl_stdin_file); }
 
 int __cdecl ungetc(int c, void* stream) {
-    if (c == -1 || !stream) return -1;
-    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
-    if (lf && lf->magic == 0x4C544C46) {
+    if (c == -1) return -1;
+    LtlFile* lf = nullptr;
+    if (stream) {
+        LtlFile* candidate = reinterpret_cast<LtlFile*>(stream);
+        if (candidate->magic == 0x4C544C46) lf = candidate;
+    } else {
+        lf = &__ltl_stdin_file;
+    }
+    if (lf) {
         lf->unget_ch = static_cast<unsigned char>(c);
         lf->eof = false;
         return c;
@@ -1427,9 +1565,15 @@ int __cdecl ungetc(int c, void* stream) {
 }
 
 wint_t __cdecl ungetwc(wint_t c, void* stream) {
-    if (c == 0xFFFF || !stream) return 0xFFFF;
-    LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
-    if (lf && lf->magic == 0x4C544C46) {
+    if (c == 0xFFFF) return 0xFFFF;
+    LtlFile* lf = nullptr;
+    if (stream) {
+        LtlFile* candidate = reinterpret_cast<LtlFile*>(stream);
+        if (candidate->magic == 0x4C544C46) lf = candidate;
+    } else {
+        lf = &__ltl_stdin_file;
+    }
+    if (lf) {
         lf->unget_wch = c;
         lf->eof = false;
         return c;
