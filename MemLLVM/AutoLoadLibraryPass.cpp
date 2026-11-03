@@ -45,28 +45,32 @@ PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM
 
   std::set<std::string> RequiredDlls;
   for (Function &F : M) {
-    if (F.isDeclaration() || F.getName() == "MemLLVM_GetApiAddress")
+    if (!F.isDeclaration() || F.isIntrinsic() || F.use_empty())
+      continue;
+    if (F.getName().starts_with("llvm.") ||
+        F.getName() == "MemLLVM_GetApiAddress" ||
+        isStaticShimSymbol(F.getName()))
       continue;
 
-    for (BasicBlock &BB : F) {
-      for (Instruction &I : BB) {
-        // Match CallBase so that API references inside __try/__except blocks
-        // (lowered to `invoke`) also contribute their owning DLL.
-        if (auto *CB = dyn_cast<CallBase>(&I)) {
-          if (CB->isInlineAsm())
-            continue;
-          Function *Callee = getDirectCallee(*CB);
-          if (Callee && Callee->isDeclaration() && !Callee->isIntrinsic() &&
-              !Callee->getName().starts_with("llvm.") &&
-              Callee->getName() != "MemLLVM_GetApiAddress" && !isStaticShimSymbol(Callee->getName())) {
-            std::string reqDll = probeRequiredDllForApi(Callee->getName());
-            if (!reqDll.empty()) {
-              errs() << "[MemLLVM] Auto-deduced DLL via SDK Import Library Index: "
-                     << Callee->getName() << " -> " << reqDll << "\n";
-              RequiredDlls.insert(reqDll);
-            }
-          }
-        }
+    std::string reqDll = probeRequiredDllForApi(F.getName());
+    if (!reqDll.empty()) {
+      if (getenv("MEMLLVM_VERBOSE")) {
+        errs() << "[MemLLVM] Auto-deduced DLL via SDK Import Library Index: "
+               << F.getName() << " -> " << reqDll << "\n";
+      }
+      RequiredDlls.insert(reqDll);
+    }
+  }
+
+  for (GlobalVariable &GV : M.globals()) {
+    StringRef Name = GV.getName();
+    if (!Name.starts_with("__imp_") || GV.use_empty())
+      continue;
+    StringRef Api = Name.drop_front(6);
+    if (!isStaticShimSymbol(Api)) {
+      std::string reqDll = probeRequiredDllForApi(Api);
+      if (!reqDll.empty()) {
+        RequiredDlls.insert(reqDll);
       }
     }
   }
@@ -74,8 +78,10 @@ PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM
   if (RequiredDlls.empty())
     return PreservedAnalyses::all();
 
-  errs() << "[MemLLVM] AutoLoadLibraryPass: Auto-detected " << RequiredDlls.size() 
-         << " required subsystem DLL(s)\n";
+  if (getenv("MEMLLVM_VERBOSE")) {
+    errs() << "[MemLLVM] AutoLoadLibraryPass: Auto-detected " << RequiredDlls.size() 
+           << " required subsystem DLL(s)\n";
+  }
 
   LLVMContext &Ctx = M.getContext();
   Type *PtrTy = PointerType::get(Ctx, 0);

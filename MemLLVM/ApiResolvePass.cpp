@@ -70,35 +70,26 @@ static bool hasAddressTakenApiUse(Function &F) {
 PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
   errs() << "[MemLLVM] Running ApiResolvePass on module: " << M.getName() << "\n";
 
-  // 1. First check if any external Windows API calls exist
-  //
-  // NOTE: match CallBase, not CallInst. MSVC SEH (__try/__except) lowers every
-  // protected call to `invoke` with an unwind edge into a catchswitch/funclet,
-  // so a CallInst-only scan silently ignores all API calls inside __try blocks.
+  // 0. Strip dllimport storage class from static shim declarations so LLVM emits
+  // direct relative calls rather than indirect calls through __imp_* IAT slots.
+  for (Function &F : M) {
+    if (F.isDeclaration() && isStaticShimSymbol(F.getName()) &&
+        F.hasDLLImportStorageClass()) {
+      F.setDLLStorageClass(GlobalValue::DefaultStorageClass);
+    }
+  }
+
+  // 1. Quick check if any external Windows API calls or slots exist
   bool HasCallsToResolve = false;
   for (Function &F : M) {
-    // Address-taken API references count as work too (see step 4b).
-    if (hasAddressTakenApiUse(F)) {
-      HasCallsToResolve = true;
-      break;
-    }
-    if (F.isDeclaration() || F.getName() == "MemLLVM_GetApiAddress")
+    if (!F.isDeclaration() || F.isIntrinsic() || F.use_empty())
       continue;
-
-    for (BasicBlock &BB : F) {
-      for (Instruction &I : BB) {
-        if (auto *CB = dyn_cast<CallBase>(&I)) {
-          if (CB->isInlineAsm())
-            continue;
-          if (shouldResolveCallee(*CB, getDirectCallee(*CB))) {
-            HasCallsToResolve = true;
-            break;
-          }
-        }
-      }
-      if (HasCallsToResolve) break;
-    }
-    if (HasCallsToResolve) break;
+    if (F.getName().starts_with("llvm.") ||
+        F.getName() == "MemLLVM_GetApiAddress" ||
+        isStaticShimSymbol(F.getName()) || !isKnownWindowsApi(F.getName()))
+      continue;
+    HasCallsToResolve = true;
+    break;
   }
 
   // `__imp_X` slots (see step 4c) are globals, not functions, so they need a
@@ -122,7 +113,9 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     // calls for address-taken APIs (see below), so fall through and link it.
     Function *Existing = M.getFunction("MemLLVM_GetApiAddress");
     if (!Existing || Existing->use_empty()) {
-      errs() << "[MemLLVM] No external Windows API calls found in module.\n";
+      if (getenv("MEMLLVM_VERBOSE")) {
+        errs() << "[MemLLVM] No external Windows API calls found in module.\n";
+      }
       findOrSynthesizeEntryPoint(M);
       return PreservedAnalyses::all();
     }
@@ -173,29 +166,40 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     ResolverFn->setLinkage(GlobalValue::LinkOnceODRLinkage);
   }
 
-  // 3. Now collect all call sites to resolve with fresh, stable instruction pointers
+  // 3. Collect all external call sites and address-taken uses via declaration def-use chains
   SmallVector<CallBase *, 16> CallsToResolve;
+  SmallVector<std::pair<Use *, Function *>, 16> AddrTakenUses;
   unsigned NumInvokes = 0;
+  unsigned NumOpaqueAddrUses = 0;
+
   for (Function &F : M) {
-    if (F.isDeclaration() || F.getName() == "MemLLVM_GetApiAddress")
+    if (!F.isDeclaration() || F.isIntrinsic() || F.use_empty())
+      continue;
+    if (F.getName().starts_with("llvm.") ||
+        F.getName() == "MemLLVM_GetApiAddress" ||
+        isStaticShimSymbol(F.getName()) || !isKnownWindowsApi(F.getName()))
       continue;
 
-    for (BasicBlock &BB : F) {
-      for (Instruction &I : BB) {
-        if (auto *CB = dyn_cast<CallBase>(&I)) {
-          if (CB->isInlineAsm())
-            continue;
-          if (shouldResolveCallee(*CB, getDirectCallee(*CB))) {
-            CallsToResolve.push_back(CB);
-            if (isa<InvokeInst>(CB))
-              ++NumInvokes;
-          }
+    for (Use &U : F.uses()) {
+      User *user = U.getUser();
+      if (auto *CB = dyn_cast<CallBase>(user)) {
+        if (!CB->isInlineAsm() && CB->getCalledOperand()->stripPointerCasts() == &F) {
+          CallsToResolve.push_back(CB);
+          if (isa<InvokeInst>(CB))
+            ++NumInvokes;
+          continue;
         }
       }
+      if (!isa<Instruction>(user)) {
+        ++NumOpaqueAddrUses;
+        continue;
+      }
+      AddrTakenUses.push_back({&U, &F});
     }
   }
 
   // 4. Rewrite each external call to dynamic indirect call
+  const bool Verbose = (getenv("MEMLLVM_VERBOSE") != nullptr);
   std::set<Function *> ResolvedCallees;
   for (size_t idx = 0; idx < CallsToResolve.size(); ++idx) {
     CallBase *CB = CallsToResolve[idx];
@@ -205,66 +209,23 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     uint32_t ApiHash = getApiHash(ApiName);
     ResolvedCallees.insert(Callee);
 
-    errs() << "[MemLLVM] (" << (idx + 1) << "/" << CallsToResolve.size()
-           << ") Rewriting " << (isa<InvokeInst>(CB) ? "invoke" : "call")
-           << " to external API: " << ApiName
-           << " (ROR13: 0x" << Twine::utohexstr(ApiHash) << ") in function: "
-           << (CB->getFunction() ? CB->getFunction()->getName() : "<none>") << "\n";
-    errs().flush();
+    if (Verbose) {
+      errs() << "[MemLLVM] (" << (idx + 1) << "/" << CallsToResolve.size()
+             << ") Rewriting " << (isa<InvokeInst>(CB) ? "invoke" : "call")
+             << " to external API: " << ApiName
+             << " (ROR13: 0x" << Twine::utohexstr(ApiHash) << ") in function: "
+             << (CB->getFunction() ? CB->getFunction()->getName() : "<none>") << "\n";
+    }
 
-    // Rewrite in place by swapping the called operand instead of materialising a
-    // fresh instruction. This preserves the CFG, which is mandatory for
-    // `invoke`: its normal/unwind successor edges belong to the *parent block*
-    // and cannot simply be re-created without re-splitting the block.
-    //
-    // The resolver returns `ptr` under opaque pointers, so the operand swap is
-    // type-correct for both direct calls and invokes.
     IRBuilder<> Builder(CB);
     Value *RawFuncPtr =
         Builder.CreateCall(ResolverFn, {Builder.getInt32(ApiHash)}, "api_ptr");
 
     CB->setCalledOperand(RawFuncPtr);
-    errs() << "   [Done " << (idx + 1) << "]\n";
-    errs().flush();
   }
 
   // 4b. Address-taken API references that appear in *code*.
-  //
-  // kull_m_crypto_sk.c does:
-  //     PBCRYPT_ENCRYPT cryptFunc = Encrypt ? BCryptEncrypt : BCryptDecrypt;
-  // That is neither a call site (step 3/4 only look at CallBase) nor a global
-  // initialiser (GlobalPointerPass only walks GV initialisers), so the two
-  // references used to survive all the way to the linker as undefined imports.
-  //
-  // Every remaining non-call use of a known Win32 declaration is replaced by a
-  // resolver call evaluated right before the consuming instruction.
-  SmallVector<std::pair<Use *, Function *>, 16> AddrTakenUses;
-  unsigned NumOpaqueAddrUses = 0;
-  for (Function &F : M) {
-    if (!F.isDeclaration() || F.isIntrinsic())
-      continue;
-    if (F.getName().starts_with("llvm.") ||
-        F.getName() == "MemLLVM_GetApiAddress" ||
-        isStaticShimSymbol(F.getName()) || !isKnownWindowsApi(F.getName()))
-      continue;
-
-    for (Use &U : F.uses()) {
-      // A ConstantExpr hop (bitcast etc.) would need the whole expression
-      // rebuilt; with opaque pointers this should not happen for a plain
-      // function pointer, so surface it instead of silently skipping.
-      if (!isa<Instruction>(U.getUser())) {
-        ++NumOpaqueAddrUses;
-        continue;
-      }
-      if (auto *CB = dyn_cast<CallBase>(U.getUser())) {
-        if (CB->getCalledOperand() == &F)
-          continue; // already rewritten in step 4
-      }
-      AddrTakenUses.push_back({&U, &F});
-    }
-  }
-
-  if (!AddrTakenUses.empty()) {
+  if (!AddrTakenUses.empty() && Verbose) {
     errs() << "[MemLLVM] Resolving " << AddrTakenUses.size()
            << " address-taken API reference(s) used as values in code\n";
   }
@@ -290,11 +251,13 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     }
     U->set(FnPtr);
 
-    errs() << "[MemLLVM]   &" << F->getName() << " -> resolver(0x"
-           << Twine::utohexstr(Hash) << ") before "
-           << User->getOpcodeName() << " in "
-           << (User->getFunction() ? User->getFunction()->getName() : "<none>")
-           << "\n";
+    if (Verbose) {
+      errs() << "[MemLLVM]   &" << F->getName() << " -> resolver(0x"
+             << Twine::utohexstr(Hash) << ") before "
+             << User->getOpcodeName() << " in "
+             << (User->getFunction() ? User->getFunction()->getName() : "<none>")
+             << "\n";
+    }
   }
   if (NumOpaqueAddrUses) {
     errs() << "[MemLLVM] WARNING: " << NumOpaqueAddrUses
@@ -343,8 +306,10 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     LI->replaceAllUsesWith(FnPtr);
     LI->eraseFromParent();
 
-    errs() << "[MemLLVM]   __imp_" << Api << " -> resolver(0x"
-           << Twine::utohexstr(Hash) << ")\n";
+    if (Verbose) {
+      errs() << "[MemLLVM]   __imp_" << Api << " -> resolver(0x"
+             << Twine::utohexstr(Hash) << ")\n";
+    }
   }
 
   // 3. Audit for any unhandled external imports with remaining uses

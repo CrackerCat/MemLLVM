@@ -50,7 +50,9 @@ PreservedAnalyses AutoMemoryPass::run(Module &M, ModuleAnalysisManager &MAM) {
     Value *Alloc = B.CreateCall(getOrInsertHeapAlloc(), {hHeap, ConstantInt::get(Int32Ty, 0), AllocSize});
     B.CreateRet(Alloc);
     Changed = true;
-    errs() << "[MemLLVM] AutoMemoryPass: Synthesized " << F->getName() << "\n";
+    if (getenv("MEMLLVM_VERBOSE")) {
+      errs() << "[MemLLVM] AutoMemoryPass: Synthesized " << F->getName() << "\n";
+    }
   };
 
   auto synthesizeDelete = [&](Function *F) {
@@ -84,7 +86,9 @@ PreservedAnalyses AutoMemoryPass::run(Module &M, ModuleAnalysisManager &MAM) {
       B.CreateRet(Constant::getNullValue(F->getReturnType()));
     }
     Changed = true;
-    errs() << "[MemLLVM] AutoMemoryPass: Synthesized " << F->getName() << "\n";
+    if (getenv("MEMLLVM_VERBOSE")) {
+      errs() << "[MemLLVM] AutoMemoryPass: Synthesized " << F->getName() << "\n";
+    }
   };
 
   const char *newFns[] = {

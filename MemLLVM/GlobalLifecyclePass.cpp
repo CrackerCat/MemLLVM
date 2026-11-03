@@ -64,15 +64,21 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
         FunctionCallee DispatchInitsFn = M.getOrInsertFunction("__memllvm_dispatch_tu_inits",
             FunctionType::get(Type::getVoidTy(M.getContext()), false));
         Builder.CreateCall(DispatchInitsFn);
-        errs() << "[MemLLVM] GlobalLifecyclePass: Injected __memllvm_dispatch_tu_inits() at entry\n";
+        if (getenv("MEMLLVM_VERBOSE")) {
+          errs() << "[MemLLVM] GlobalLifecyclePass: Injected __memllvm_dispatch_tu_inits() at entry\n";
+        }
 
         for (const auto &item : Ctors) {
-          errs() << "[MemLLVM] GlobalLifecyclePass: Inserting call to global constructor @" 
-                 << item.func->getName() << " (Priority: " << item.priority << ")\n";
+          if (getenv("MEMLLVM_VERBOSE")) {
+            errs() << "[MemLLVM] GlobalLifecyclePass: Inserting call to global constructor @" 
+                   << item.func->getName() << " (Priority: " << item.priority << ")\n";
+          }
           Builder.CreateCall(item.func, {});
         }
         CtorsVar->eraseFromParent();
-        errs() << "[MemLLVM] GlobalLifecyclePass: Erased @llvm.global_ctors to eliminate .CRT$XCU section in entry TU.\n";
+        if (getenv("MEMLLVM_VERBOSE")) {
+          errs() << "[MemLLVM] GlobalLifecyclePass: Erased @llvm.global_ctors to eliminate .CRT$XCU section in entry TU.\n";
+        }
         Changed = true;
       } else {
         // Non-entry TU: dispatch constructors via per-TU init function in .mli section
@@ -80,8 +86,10 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
         Instruction *InsertBefore = TuInit->getEntryBlock().getTerminator();
         IRBuilder<> Builder(InsertBefore);
         for (const auto &item : Ctors) {
-          errs() << "[MemLLVM] GlobalLifecyclePass: Appending call to global constructor @" 
-                 << item.func->getName() << " (Priority: " << item.priority << ") into TU init\n";
+          if (getenv("MEMLLVM_VERBOSE")) {
+            errs() << "[MemLLVM] GlobalLifecyclePass: Appending call to global constructor @" 
+                   << item.func->getName() << " (Priority: " << item.priority << ") into TU init\n";
+          }
           Builder.CreateCall(item.func, {});
         }
         registerTuInit(M, TuInit);
@@ -105,7 +113,9 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
     FunctionCallee DispatchInitsFn = M.getOrInsertFunction("__memllvm_dispatch_tu_inits",
         FunctionType::get(Type::getVoidTy(M.getContext()), false));
     Builder.CreateCall(DispatchInitsFn);
-    errs() << "[MemLLVM] GlobalLifecyclePass: Injected __memllvm_dispatch_tu_inits() at entry (no local ctors)\n";
+    if (getenv("MEMLLVM_VERBOSE")) {
+      errs() << "[MemLLVM] GlobalLifecyclePass: Injected __memllvm_dispatch_tu_inits() at entry (no local ctors)\n";
+    }
     Changed = true;
   }
 
@@ -128,7 +138,9 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
       IRBuilder<> Builder(InsertBefore);
       Builder.CreateCall(InitCoutFn);
       Changed = true;
-      errs() << "[MemLLVM] GlobalLifecyclePass: Injected MemLLVM_InitCout() for std::cout/cerr\n";
+      if (getenv("MEMLLVM_VERBOSE")) {
+        errs() << "[MemLLVM] GlobalLifecyclePass: Injected MemLLVM_InitCout() for std::cout/cerr\n";
+      }
     }
   }
 
@@ -149,8 +161,10 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
         Builder.CreateCall(DoExitFn);
         Changed = true;
       }
-      errs() << "[MemLLVM] GlobalLifecyclePass: Inserted _doexit() call before "
-             << RetInsts.size() << " return point(s) in @" << EntryFn->getName() << "\n";
+      if (getenv("MEMLLVM_VERBOSE")) {
+        errs() << "[MemLLVM] GlobalLifecyclePass: Inserted _doexit() call before "
+               << RetInsts.size() << " return point(s) in @" << EntryFn->getName() << "\n";
+      }
     }
   }
 

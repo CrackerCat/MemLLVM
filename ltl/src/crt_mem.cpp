@@ -56,6 +56,7 @@ int __C_specific_handler(void* ExceptionRecord, void* EstablisherFrame,
 
 [[noreturn]] void __cdecl __std_terminate() noexcept {
     ExitProcess(0xc0000025);
+    __builtin_unreachable();
 }
 
 #pragma function(memcpy)
@@ -89,11 +90,12 @@ void* memset(void* dest, int c, size_t count) {
 // gets optimised straight back into a recursive call to memcmp.
 #pragma function(memcmp)
 int memcmp(const void* s1, const void* s2, size_t n) {
-    if (!n) return 0;
+    if (s1 == s2 || !n) return 0;
     int res = 0;
     __asm__ volatile(
+        "xorl %%eax, %%eax\n\t"
         "repe cmpsb\n\t"
-        "jz 1f\n\t"
+        "je 1f\n\t"
         "movzbl -1(%%rsi), %%eax\n\t"
         "movzbl -1(%%rdi), %%edx\n\t"
         "subl %%edx, %%eax\n\t"
@@ -563,6 +565,7 @@ extern "C" void* const __imp_GetActiveProcessorCount = (void*)GetActiveProcessor
 // ============================================================================
 
 void* __stdcall GetCommandLineW();
+void* __stdcall GetProcessHeap();
 wchar_t** __stdcall CommandLineToArgvW(const wchar_t* lpCmdLine, int* pNumArgs);
 void* __stdcall HeapAlloc(void* hHeap, unsigned int dwFlags, size_t dwBytes);
 int __stdcall WideCharToMultiByte(unsigned int CodePage, unsigned int dwFlags,

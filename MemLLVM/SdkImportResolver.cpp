@@ -41,6 +41,8 @@ private:
   std::vector<std::string> DllNames;
   std::vector<SdkApiEntry> Entries;
   std::unordered_map<std::string, std::string> DynamicCache;
+  std::unordered_map<std::string, bool> ApiCheckCache;
+  std::unordered_map<std::string, std::string> ApiDllCache;
 
   bool loadFromMemory(const uint8_t *data, size_t size) {
     if (size < 16) return false;
@@ -233,14 +235,27 @@ public:
   }
 
   std::string resolve(StringRef ApiName) {
+    if (ApiName.empty() || ApiName.starts_with("?") || ApiName.starts_with("llvm."))
+      return "";
+
+    std::string s = ApiName.str();
+    auto cacheIt = ApiDllCache.find(s);
+    if (cacheIt != ApiDllCache.end())
+      return cacheIt->second;
+
     init();
 
 #ifdef _WIN32
     static HMODULE hK32 = GetModuleHandleA("kernel32.dll");
     static HMODULE hNt = GetModuleHandleA("ntdll.dll");
-    std::string s = ApiName.str();
-    if (hK32 && GetProcAddress(hK32, s.c_str())) return "";
-    if (hNt && GetProcAddress(hNt, s.c_str())) return "";
+    if (hK32 && GetProcAddress(hK32, s.c_str())) {
+      ApiDllCache[s] = "";
+      return "";
+    }
+    if (hNt && GetProcAddress(hNt, s.c_str())) {
+      ApiDllCache[s] = "";
+      return "";
+    }
 #endif
 
     auto normalizeDll = [](const std::string &dll) -> std::string {
@@ -257,22 +272,29 @@ public:
       return e.hash < val;
     });
     if (it != Entries.end() && it->hash == h) {
-      return normalizeDll(DllNames[it->dllIndex]);
+      std::string res = normalizeDll(DllNames[it->dllIndex]);
+      ApiDllCache[s] = res;
+      return res;
     }
 
     // Check dynamic cache (e.g. from local scanned .libs)
-    auto dynIt = DynamicCache.find(ApiName.str());
+    auto dynIt = DynamicCache.find(s);
     if (dynIt != DynamicCache.end()) {
-      return normalizeDll(dynIt->second);
+      std::string res = normalizeDll(dynIt->second);
+      ApiDllCache[s] = res;
+      return res;
     }
 
     // Fallback: on-demand scan *.lib in current directory
     scanLocalLibsForApi(ApiName);
-    dynIt = DynamicCache.find(ApiName.str());
+    dynIt = DynamicCache.find(s);
     if (dynIt != DynamicCache.end()) {
-      return normalizeDll(dynIt->second);
+      std::string res = normalizeDll(dynIt->second);
+      ApiDllCache[s] = res;
+      return res;
     }
 
+    ApiDllCache[s] = "";
     return "";
   }
 
@@ -280,12 +302,22 @@ public:
     if (ApiName.empty() || ApiName.starts_with("?") || ApiName.starts_with("llvm."))
       return false;
 
+    std::string s = ApiName.str();
+    auto cacheIt = ApiCheckCache.find(s);
+    if (cacheIt != ApiCheckCache.end())
+      return cacheIt->second;
+
 #ifdef _WIN32
     static HMODULE hK32 = GetModuleHandleA("kernel32.dll");
     static HMODULE hNt = GetModuleHandleA("ntdll.dll");
-    std::string s = ApiName.str();
-    if (hK32 && GetProcAddress(hK32, s.c_str())) return true;
-    if (hNt && GetProcAddress(hNt, s.c_str())) return true;
+    if (hK32 && GetProcAddress(hK32, s.c_str())) {
+      ApiCheckCache[s] = true;
+      return true;
+    }
+    if (hNt && GetProcAddress(hNt, s.c_str())) {
+      ApiCheckCache[s] = true;
+      return true;
+    }
 #endif
 
     init();
@@ -294,20 +326,24 @@ public:
       return e.hash < val;
     });
     if (it != Entries.end() && it->hash == h) {
+      ApiCheckCache[s] = true;
       return true;
     }
 
-    auto dynIt = DynamicCache.find(ApiName.str());
+    auto dynIt = DynamicCache.find(s);
     if (dynIt != DynamicCache.end()) {
+      ApiCheckCache[s] = true;
       return true;
     }
 
     scanLocalLibsForApi(ApiName);
-    dynIt = DynamicCache.find(ApiName.str());
+    dynIt = DynamicCache.find(s);
     if (dynIt != DynamicCache.end()) {
+      ApiCheckCache[s] = true;
       return true;
     }
 
+    ApiCheckCache[s] = false;
     return false;
   }
 };

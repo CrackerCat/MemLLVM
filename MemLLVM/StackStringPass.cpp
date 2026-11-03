@@ -108,54 +108,46 @@ static bool transformGlobalString(GlobalVariable *GV, Module &M) {
   if (TargetFunctions.empty())
     return false;
 
-  errs() << "[MemLLVM] Unfolding string constant @" << GV->getName()
-         << " (length: " << N << " bytes) into " << TargetFunctions.size() << " function(s)\n";
+  if (getenv("MEMLLVM_VERBOSE")) {
+    errs() << "[MemLLVM] Unfolding string constant @" << GV->getName()
+           << " (length: " << N << " bytes) into " << TargetFunctions.size() << " function(s)\n";
+  }
 
   for (Function *F : TargetFunctions) {
     if (F->isDeclaration())
       continue;
 
-    // 1. Unpack ConstantExpr inside F
-    bool Changed = true;
-    while (Changed) {
-      Changed = false;
-      for (BasicBlock &BB : *F) {
-        for (Instruction &I : BB) {
-          for (unsigned op = 0; op < I.getNumOperands(); ++op) {
-            if (auto *CE = dyn_cast<ConstantExpr>(I.getOperand(op))) {
-              bool UsesGV = false;
-              SmallVector<ConstantExpr *, 4> CEQueue;
-              CEQueue.push_back(CE);
-              while (!CEQueue.empty()) {
-                ConstantExpr *Cur = CEQueue.pop_back_val();
-                for (unsigned cop = 0; cop < Cur->getNumOperands(); ++cop) {
-                  if (Cur->getOperand(cop) == GV) {
-                    UsesGV = true;
-                    break;
-                  }
-                  if (auto *Sub = dyn_cast<ConstantExpr>(Cur->getOperand(cop)))
-                    CEQueue.push_back(Sub);
-                }
-                if (UsesGV) break;
-              }
+    // 1. Unpack ConstantExpr inside F via def-use chains directly (no whole-function loops)
+    SmallVector<ConstantExpr *, 8> CEUsers;
+    for (User *U : GV->users()) {
+      if (auto *CE = dyn_cast<ConstantExpr>(U)) {
+        CEUsers.push_back(CE);
+      }
+    }
 
-              if (UsesGV) {
-                Instruction *NewInst = CE->getAsInstruction();
-                if (auto *PN = dyn_cast<PHINode>(&I)) {
+    while (!CEUsers.empty()) {
+      ConstantExpr *CE = CEUsers.pop_back_val();
+      SmallVector<User *, 8> SubUsers(CE->user_begin(), CE->user_end());
+      for (User *SubU : SubUsers) {
+        if (auto *SubCE = dyn_cast<ConstantExpr>(SubU)) {
+          CEUsers.push_back(SubCE);
+        } else if (auto *I = dyn_cast<Instruction>(SubU)) {
+          if (I->getFunction() == F) {
+            Instruction *NewInst = CE->getAsInstruction();
+            if (auto *PN = dyn_cast<PHINode>(I)) {
+              for (unsigned op = 0; op < PN->getNumIncomingValues(); ++op) {
+                if (PN->getIncomingValue(op) == CE) {
                   BasicBlock *PredBB = PN->getIncomingBlock(op);
                   NewInst->insertBefore(PredBB->getTerminator()->getIterator());
-                } else {
-                  NewInst->insertBefore(I.getIterator());
+                  PN->setIncomingValue(op, NewInst);
                 }
-                I.setOperand(op, NewInst);
-                Changed = true;
-                break;
               }
+            } else {
+              NewInst->insertBefore(I->getIterator());
+              I->replaceUsesOfWith(CE, NewInst);
             }
           }
-          if (Changed) break;
         }
-        if (Changed) break;
       }
     }
 
@@ -204,31 +196,12 @@ static bool transformGlobalString(GlobalVariable *GV, Module &M) {
       Offset += 1;
     }
 
-    // 3. Replace all uses of GV within F with Alloca
-    for (BasicBlock &BB : *F) {
-      for (Instruction &I : BB) {
-        if (&I == Alloca)
-          continue;
-
-        bool IsGeneratedStore = false;
-        if (auto *SI = dyn_cast<StoreInst>(&I)) {
-          if (SI->isVolatile()) {
-            Value *Ptr = SI->getPointerOperand();
-            if (Ptr == Alloca)
-              IsGeneratedStore = true;
-            else if (auto *GEP = dyn_cast<GetElementPtrInst>(Ptr)) {
-              if (GEP->getPointerOperand() == Alloca)
-                IsGeneratedStore = true;
-            }
-          }
-        }
-        if (IsGeneratedStore)
-          continue;
-
-        for (unsigned op = 0; op < I.getNumOperands(); ++op) {
-          if (I.getOperand(op) == GV) {
-            I.setOperand(op, Alloca);
-          }
+    // 3. Replace all direct uses of GV within F with Alloca
+    SmallVector<User *, 16> GVUsers(GV->user_begin(), GV->user_end());
+    for (User *U : GVUsers) {
+      if (auto *I = dyn_cast<Instruction>(U)) {
+        if (I->getFunction() == F && I != Alloca) {
+          I->replaceUsesOfWith(GV, Alloca);
         }
       }
     }
@@ -245,10 +218,14 @@ static bool transformGlobalString(GlobalVariable *GV, Module &M) {
 }
 
 PreservedAnalyses StackStringPass::run(Module &M, ModuleAnalysisManager &MAM) {
-  errs() << "[MemLLVM] Running StackStringPass on module: " << M.getName() << "\n";
+  if (getenv("MEMLLVM_VERBOSE")) {
+    errs() << "[MemLLVM] Running StackStringPass on module: " << M.getName() << "\n";
+  }
 
   if (getenv("MEMLLVM_DISABLE_STACK_STRINGS")) {
-    errs() << "[MemLLVM] StackStringPass skipped (MEMLLVM_DISABLE_STACK_STRINGS is set)\n";
+    if (getenv("MEMLLVM_VERBOSE")) {
+      errs() << "[MemLLVM] StackStringPass skipped (MEMLLVM_DISABLE_STACK_STRINGS is set)\n";
+    }
     return PreservedAnalyses::all();
   }
 
@@ -266,8 +243,10 @@ PreservedAnalyses StackStringPass::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
-  errs() << "[MemLLVM] StackStringPass successfully transformed "
-         << TransformedCount << " global string(s).\n";
+  if (getenv("MEMLLVM_VERBOSE") || TransformedCount > 0) {
+    errs() << "[MemLLVM] StackStringPass: Transformed "
+           << TransformedCount << " global string(s).\n";
+  }
 
   if (TransformedCount > 0)
     return PreservedAnalyses::none();

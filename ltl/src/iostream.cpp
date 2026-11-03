@@ -100,6 +100,7 @@ static int __cdecl _MemLLVM_streambuf_noop(void*) {
 namespace std {
 
 static void* _g_streambuf_vtable[16] = { 0 };
+static void* _g_ios_vtable[16] = { 0 };
 
 static const int _g_cout_vbtable[2] = { 0, 16 };
 
@@ -139,6 +140,7 @@ extern "C" void MemLLVM_InitCout(void) {
 
     for (int i = 0; i < 16; ++i) {
         _g_streambuf_vtable[i] = (void*)&_MemLLVM_streambuf_noop;
+        _g_ios_vtable[i] = (void*)&_MemLLVM_streambuf_noop;
     }
     _g_streambuf_vtable[3] = (void*)&_MemLLVM_streambuf_overflow;
     _g_streambuf_vtable[6] = (void*)&_MemLLVM_streambuf_underflow;
@@ -167,27 +169,33 @@ extern "C" void MemLLVM_InitCout(void) {
     _g_cin_locale_storage[1] = locimp;
 
     _g_cout_storage.vbtable = _g_cout_vbtable;
+    _g_cout_storage.ios_vftable = _g_ios_vtable;
     _g_cout_storage.mystate = 0;
     _g_cout_storage.fmtfl = 0x201;
     _g_cout_storage.prec = 6;
     _g_cout_storage.ploc = _g_cout_locale_storage;
     _g_cout_storage.rdbuf = &_g_cout_buf;
+    _g_cout_storage.tied = nullptr;
     _g_cout_storage.fillch = 0x20;
 
     _g_cerr_storage.vbtable = _g_cout_vbtable;
+    _g_cerr_storage.ios_vftable = _g_ios_vtable;
     _g_cerr_storage.mystate = 0;
     _g_cerr_storage.fmtfl = 0x201;
     _g_cerr_storage.prec = 6;
     _g_cerr_storage.ploc = _g_cout_locale_storage;
     _g_cerr_storage.rdbuf = &_g_cout_buf;
+    _g_cerr_storage.tied = nullptr;
     _g_cerr_storage.fillch = 0x20;
 
     _g_cin_storage.vbtable = _g_cout_vbtable;
+    _g_cin_storage.ios_vftable = _g_ios_vtable;
     _g_cin_storage.mystate = 0;
     _g_cin_storage.fmtfl = 0x201;
     _g_cin_storage.prec = 6;
     _g_cin_storage.ploc = _g_cin_locale_storage;
     _g_cin_storage.rdbuf = &_g_cin_buf;
+    _g_cin_storage.tied = nullptr;
     _g_cin_storage.fillch = 0x20;
 }
 

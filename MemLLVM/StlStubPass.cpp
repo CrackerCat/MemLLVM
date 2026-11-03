@@ -34,8 +34,10 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
     B.CreateCall(getOrInsertExitProcess(), {ConstantInt::get(Int32Ty, code)});
     B.CreateUnreachable();
     Changed = true;
-    errs() << "[MemLLVM] StlStubPass: Synthesized fatal stub " << F->getName() 
-           << " (ExitProcess 0x" << Twine::utohexstr(code) << ")\n";
+    if (getenv("MEMLLVM_VERBOSE")) {
+      errs() << "[MemLLVM] StlStubPass: Synthesized fatal stub " << F->getName() 
+             << " (ExitProcess 0x" << Twine::utohexstr(code) << ")\n";
+    }
   };
 
   auto synthesizeNoop = [&](Function *F) {
@@ -53,7 +55,9 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
       B.CreateRet(Constant::getNullValue(F->getReturnType()));
     }
     Changed = true;
-    errs() << "[MemLLVM] StlStubPass: Synthesized no-op stub " << F->getName() << "\n";
+    if (getenv("MEMLLVM_VERBOSE")) {
+      errs() << "[MemLLVM] StlStubPass: Synthesized no-op stub " << F->getName() << "\n";
+    }
   };
 
   struct FatalStubEntry {
