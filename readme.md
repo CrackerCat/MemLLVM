@@ -212,6 +212,7 @@ examples/
    - **Auto-Binds Bundled Hermetic Toolchain**: Sets `LLVMInstallDir` to the SDK's embedded `toolchain/` directory so Visual Studio ClangCL automatically invokes the exact binary-aligned `clang-cl.exe`, eliminating host Clang ABI mismatches and plugin loading errors!
    - Mounts `toolchain\bin`, `bin`, and `Tools` into your User `PATH`.
    - **Smart Path Migration**: Moving the SDK in the future? Just run `setup_env.bat` again in the new folder—it automatically purges old stale paths.
+   - **One-Click In-Place Auto-Update**: The SDK comes with `update.bat`. Run it at any time to automatically fetch the latest release from GitHub and overwrite your local SDK in-place, then re-synchronize configurations.
 
 ### 2. Enable Clang in Visual Studio
 * **Option A (Recommended Built-in Component)**: Open Visual Studio Installer -> Modify -> Individual components -> Search `Clang` -> Check **C++ Clang Compiler for Windows** and **MSBuild support for LLVM toolset**.

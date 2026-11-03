@@ -290,6 +290,8 @@ jobs:
           Copy-Item "readme_zh.md" "$sdk/" -Force
           Copy-Item "setup_env.bat" "$sdk/" -Force
           Copy-Item "setup_env.ps1" "$sdk/" -Force
+          Copy-Item "update.bat" "$sdk/" -Force
+          Copy-Item "update.ps1" "$sdk/" -Force
 
           # 6. Examples (mimikatz source + MemLLVM build config included)
           Copy-Item -Recurse "examples/*" "$sdk/examples/" -Force

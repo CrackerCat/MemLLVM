@@ -202,6 +202,7 @@ examples/
    - **自动绑定对齐的轻量编译器**：自动将 `LLVMInstallDir` 环境变量绑定至 SDK 内置的 `toolchain` 目录，使 Visual Studio 的 `ClangCL` 工具集自动调用完全二进制对齐的 `clang-cl.exe`，彻底避免第三方 Clang 造成的 ABI 崩溃或插件加载失败；
    - 自动将 `toolchain\bin`、`bin` 和 `Tools` 挂载到用户 `PATH`，命令行直接可用 `clang-cl`；
    - **智能防冗余**：未来移动 SDK 到新目录，直接在新目录下再次双击即可自动迁移，绝不残留旧路径。
+   - **一键平滑升级**：SDK 目录下内置了 `update.bat`。后续任何时候想要获取更新，直接双击运行 `update.bat` 即可自动拉取 GitHub 最新版本并热更新覆盖本地，同时自动刷新配置！
 
 ### 第二步：Visual Studio 启用 Clang
 * **方式 A（最推荐内置组件）**：打开 Visual Studio Installer -> 修改 -> 单个组件 -> 搜索 `Clang` -> 勾选 **适用于 Windows 的 C++ Clang 编译器** 与 **LLVM 工具集 MSBuild 支持**。
