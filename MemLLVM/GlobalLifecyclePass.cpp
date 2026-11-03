@@ -144,26 +144,38 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
     }
   }
 
-  // 2. Ensure _doexit() is invoked before entry function returns
+  // 2. Ensure _doexit() is invoked before entry function returns (only if module has ctors/dtors/atexit)
   if (EntryFn && !EntryFn->empty()) {
-    SmallVector<ReturnInst *, 4> RetInsts;
-    for (BasicBlock &BB : *EntryFn) {
-      if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
-        RetInsts.push_back(RI);
-      }
+    bool NeedsDoExit = false;
+    if (CtorsVar && CtorsVar->hasInitializer()) NeedsDoExit = true;
+    if (M.getGlobalVariable("llvm.global_dtors")) NeedsDoExit = true;
+    if (Function *F = M.getFunction("atexit")) {
+      if (!F->use_empty()) NeedsDoExit = true;
+    }
+    if (Function *F = M.getFunction("__cxa_atexit")) {
+      if (!F->use_empty()) NeedsDoExit = true;
     }
 
-    if (!RetInsts.empty()) {
-      FunctionCallee DoExitFn = M.getOrInsertFunction("_doexit",
-          FunctionType::get(Type::getVoidTy(M.getContext()), false));
-      for (ReturnInst *RI : RetInsts) {
-        IRBuilder<> Builder(RI);
-        Builder.CreateCall(DoExitFn);
-        Changed = true;
+    if (NeedsDoExit) {
+      SmallVector<ReturnInst *, 4> RetInsts;
+      for (BasicBlock &BB : *EntryFn) {
+        if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
+          RetInsts.push_back(RI);
+        }
       }
-      if (getenv("MEMLLVM_VERBOSE")) {
-        errs() << "[MemLLVM] GlobalLifecyclePass: Inserted _doexit() call before "
-               << RetInsts.size() << " return point(s) in @" << EntryFn->getName() << "\n";
+
+      if (!RetInsts.empty()) {
+        FunctionCallee DoExitFn = M.getOrInsertFunction("_doexit",
+            FunctionType::get(Type::getVoidTy(M.getContext()), false));
+        for (ReturnInst *RI : RetInsts) {
+          IRBuilder<> Builder(RI);
+          Builder.CreateCall(DoExitFn);
+          Changed = true;
+        }
+        if (getenv("MEMLLVM_VERBOSE")) {
+          errs() << "[MemLLVM] GlobalLifecyclePass: Inserted _doexit() call before "
+                 << RetInsts.size() << " return point(s) in @" << EntryFn->getName() << "\n";
+        }
       }
     }
   }

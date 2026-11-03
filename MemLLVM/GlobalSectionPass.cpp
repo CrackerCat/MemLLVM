@@ -12,6 +12,7 @@ namespace memllvm {
 PreservedAnalyses GlobalSectionPass::run(Module &M, ModuleAnalysisManager &MAM) {
   bool Changed = false;
   LLVMContext &Ctx = M.getContext();
+  errs() << "[MemLLVM] GlobalSectionPass running on module: " << M.getName() << "\n";
 
   for (GlobalVariable &GV : M.globals()) {
     if (GV.isDeclaration())
