@@ -53,6 +53,7 @@ if "%PLUGIN_DLL%"=="" (
 echo [*] Compiling MemLLVM-LTL components...
 
 set COMP_FLAGS=/c /O1 /clang:-Oz /Gy /clang:-ffunction-sections /clang:-fdata-sections /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%"
+set EH_COMP_FLAGS=/c /O1 /clang:-Oz /Gy /clang:-ffunction-sections /clang:-fdata-sections /GS- /GR- /clang:-fno-jump-tables /EHsc -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%"
 
 "%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\concurrency.cpp" /Fo"%LTL_ROOT%\src\concurrency.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
@@ -66,7 +67,7 @@ if %ERRORLEVEL% neq 0 exit /b 1
 "%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\crt_mem.cpp" /Fo"%LTL_ROOT%\src\crt_mem.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\crt_exceptions.cpp" /Fo"%LTL_ROOT%\src\crt_exceptions.obj"
+"%CLANG_BIN%" %EH_COMP_FLAGS% "%LTL_ROOT%\src\crt_exceptions.cpp" /Fo"%LTL_ROOT%\src\crt_exceptions.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
 "%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\crt_atexit.cpp" /Fo"%LTL_ROOT%\src\crt_atexit.obj"
