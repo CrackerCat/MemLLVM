@@ -1,0 +1,22 @@
+#include <windows.h>
+#include <cstdarg>
+
+extern "C" {
+
+int __cdecl __stdio_common_vfprintf(unsigned __int64 options, void* stream, const char* format, void* locale, va_list valist);
+void* __cdecl __acrt_iob_func(unsigned int idx);
+
+int __cdecl printf(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int ret = __stdio_common_vfprintf(0, __acrt_iob_func(1), format, nullptr, args);
+    va_end(args);
+    return ret;
+}
+
+int __cdecl puts(const char* s) {
+    va_list args;
+    return __stdio_common_vfprintf(0, __acrt_iob_func(1), "%s\n", nullptr, (va_list)&s);
+}
+
+}

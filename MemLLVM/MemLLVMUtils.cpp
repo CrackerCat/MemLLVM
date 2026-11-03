@@ -89,6 +89,7 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "_doexit" || Name == "_initterm" || Name == "_initterm_e" ||
       Name == "__memllvm_dispatch_tu_inits" ||
       Name == "GetActiveProcessorCount" ||
+      Name == "printf" || Name == "puts" ||
       Name == "__C_specific_handler" ||
       Name == "_fltused") {
     return true;

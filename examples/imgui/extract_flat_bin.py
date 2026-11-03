@@ -99,13 +99,16 @@ def parse_pe(data):
         hdr = sec_off + i * 40
         name = data[hdr:hdr + 8].rstrip(b'\0').decode('latin1', errors='ignore')
         virt_size, virt_addr, raw_size, raw_ptr = struct.unpack_from('<IIII', data, hdr + 8)
+        # In a flat in-memory image, a section's span is its virtual memory footprint (virt_size),
+        # not the raw PE disk alignment padding (raw_size).
+        span = virt_size if virt_size > 0 else raw_size
         sections.append({
             'name': name,
             'virt_size': virt_size,
             'virt_addr': virt_addr,
             'raw_size': raw_size,
             'raw_ptr': raw_ptr,
-            'span': max(virt_size, raw_size),
+            'span': span,
         })
 
     # DataDirectory[5] == IMAGE_DIRECTORY_ENTRY_BASERELOC
@@ -251,11 +254,12 @@ def make_flat_bin(exe_path, out_bin_path):
 
     for sec in packed:
         off = sec['virt_addr'] - base_rva
-        raw = data[sec['raw_ptr']:sec['raw_ptr'] + sec['raw_size']]
+        actual_raw = min(sec['raw_size'], sec['span']) if sec['raw_size'] else 0
+        raw = data[sec['raw_ptr']:sec['raw_ptr'] + actual_raw] if actual_raw else b''
         if raw:
             flat_buf[off:off + len(raw)] = raw
-        if sec['span'] > sec['raw_size']:
-            flat_buf[off + sec['raw_size']:off + sec['span']] = b'\0' * (sec['span'] - sec['raw_size'])
+        if sec['span'] > len(raw):
+            flat_buf[off + len(raw):off + sec['span']] = b'\0' * (sec['span'] - len(raw))
         print('  Section %-8s RVA=0x%-6X span=0x%-6X raw=0x%-6X -> off 0x%X'
               % (sec['name'], sec['virt_addr'], sec['span'], sec['raw_size'], off))
 
