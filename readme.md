@@ -72,11 +72,13 @@ entry(); // Boots up full C++20 runtime, static objects, and main() instantly!
 
 ---
 
-## 🎯 >99.5% Coverage Matrix & What is NOT Supported
+## 🎯 Industrial Coverage & In-Depth Architectural Boundaries
 
-MemLLVM covers **over 99.5% of all real-world C and C++ development scenarios**, allowing off-the-shelf industrial libraries and game engines to compile into flat binaries without source modification.
+While MemLLVM breaks through compiler-level barriers—achieving unprecedented C++20 language completeness in pure memory—operating completely outside the operating system's native PE loader inevitably meets fundamental **environmental and OS contract boundaries**.
 
-### ✅ What is Fully Supported (> 99.5% Scenarios):
+When designing or porting complex software into loaderless flat binaries, developers must understand and observe the following **six core architectural boundaries**:
+
+### ✅ Fully Supported at the Compiler & Language Layer:
 | Domain | Supported Capabilities |
 | :--- | :--- |
 | **Language Features** | Templates, concepts, lambdas, Meyers singletons, `constexpr`, type traits, function pointers, multi-level virtual inheritance & dynamic polymorphism (`vtable`). |
@@ -90,18 +92,49 @@ MemLLVM covers **over 99.5% of all real-world C and C++ development scenarios**,
 
 ---
 
-### ⚠️ What is Currently NOT Supported (The Remaining < 0.5%):
+### ⚠️ The 6 Real-World Architectural Boundaries & Best Practices:
 
-While MemLLVM pushes the frontier of freestanding execution, operating outside the OS PE loader imposes two remaining technical boundaries:
+#### 1. Module Identity & Filesystem Context Severance
+* **The `GetModuleHandle(NULL)` and `GetModuleFileName` Impersonation Trap**:
+  In loaderless memory execution, the operating system does not assign an independent `HMODULE` to the flat binary. Any library or code calling `GetModuleHandle(NULL)` or `GetModuleFileName(NULL, ...)` to locate "its own folder" for sibling assets (e.g. fonts, SQLite DBs, config files) will unexpectedly receive the **absolute path of the HOST process** (e.g., `explorer.exe` or the loader itself)!
+  - **Best Practice**: Never rely on `GetModuleFileName(NULL)` to locate companion assets. Pass paths explicitly via `main` arguments, use absolute paths, or embed assets as inline byte arrays.
+* **Current Working Directory (CWD) Reliance**:
+  Relative paths (e.g., `fopen("config.ini", "r")`) resolve against the host process's active working directory, not the memory blob's location.
 
-1. **Native Windows PE Resource Files (`.rsrc` / RC Files)**:
-   - **Why**: Flat binaries lack PE headers, section headers, and standard Resource Directory Trees. Win32 APIs like `FindResource`, `LoadIcon`, and `LoadAccelerators` require an OS `HMODULE` pointing to a mapped PE image.
-   - **Current Requirement**: Embed binary assets (textures, shaders, audio, fonts) as inline byte arrays or companion streaming containers (e.g., `doom1.wad`).
-   - **Roadmap**: Developing an in-memory virtual resource table emulator and pseudo-`HMODULE` dispatcher.
+#### 2. Absence of Native PE Loader Facilities
+* **Native Windows PE Resources (`.rsrc` / RC Files / Dialog Templates)**:
+  Flat binaries strip all PE section headers and Resource Directory Trees. Win32 APIs like `FindResource`, `LoadIcon`, `LoadAccelerators`, and `DialogBox` cannot function.
+  - **Best Practice**: Embed textures, fonts, audio, and shaders as inline C/C++ byte arrays or companion streaming containers (e.g., `doom1.wad`).
+* **Windows Manifests, ComCtl32 v6 Visual Styles & High-DPI**:
+  Standard PEs rely on embedded manifests (`RT_MANIFEST`) to activate Common Controls v6 (modern visual styles) and declare DPI awareness. In a flat binary, standard Win32 dialogs fallback to classic Windows 2000 flat appearance.
+  - **Best Practice**: Use self-rendered UI engines (DirectX 11 / Direct2D / Dear ImGui), or programmatically mount activation contexts via `CreateActCtx` and call `SetProcessDpiAwarenessContext`.
+* **Namespace-Scope `thread_local` & TLS Callbacks**:
+  While thread-safe local statics are rewritten into atomic CAS, namespace-scope and class-static `thread_local` variables still require `__tls_index` slots. Furthermore, the OS loader cannot fire `PIMAGE_TLS_CALLBACK` notifications when new threads spawn.
+  - **Best Practice**: Use explicit Win32 TLS APIs (`TlsAlloc`, `TlsGetValue`, `TlsSetValue`) for thread-specific state.
 
-2. **The C++ `thread_local` Keyword**:
-   - **Why**: Native `thread_local` requires OS PE loader thread attach notifications and slot assignment via `__tls_index` (`TEB->ThreadLocalStoragePointer` at `gs:[0x58]`).
-   - **Current Requirement**: Use explicit Win32 TLS APIs (`TlsAlloc`, `TlsGetValue`, `TlsSetValue`). (Note: Meyers local statics are 100% supported via atomic CAS rewrites).
+#### 3. Execution Morphology & Library Boundaries
+* **Single-Entry Payload Model vs. Shared Library (No EAT)**:
+  MemLLVM generates a standalone execution payload with a single entry point (offset 0 jumping to `main` after self-rebasing). **It cannot act as a multi-export Dynamic Link Library (DLL)** exporting dozens of named symbols for external callers.
+* **Strictly x64 Architecture Exclusivity**:
+  The entire pipeline (PE parsing, DIR64 fixups, ROR13 API resolution, 12-byte `.pdata` tables, and x64 assembly stubs) is hardcoded for the **Windows x86_64 ABI**. It **does not support 32-bit x86 (IA-32)** (which requires `FS:[0x30]`, HIGHLOW relocations, and linked-list SEH) or **ARM64**.
+
+#### 4. Host Process Lifecycle Coupling
+* **The `exit()` / `abort()` Host Termination Risk**:
+  In a standalone EXE, calling `exit(code)` terminates normally. When running as an in-memory payload inside a host process, calling standard library `exit()` or `abort()` calls `ExitProcess`, **instantly killing the entire host process**!
+  - **Best Practice**: If the payload must return cleanly to the host, it must `return` from `main()` or invoke `ExitThread`. Avoid calling `exit()` in embedded scenarios.
+* **Direct Command Line (`GetCommandLine`) Query Pollution**:
+  `GetCommandLineA/W` returns the host process's creation command line. While MemLLVM's stub reconstructs `main(argc, argv)`, libraries bypassing `main` and querying the PEB directly will observe host parameters.
+
+#### 5. Dynamic API Resolution Limits
+* **Ordinal-Only Import Functions Cannot Be Automatically Inlined**:
+  MemLLVM's `ApiResolvePass` and runtime resolver scan PE export name tables (`AddressOfNames`) using ROR13 hashing. APIs exported exclusively by ordinal (without a name string, found in legacy Winsock or private Shell functions) cannot be resolved via name hash.
+  - **Best Practice**: For ordinal-only APIs, resolve them manually using `LoadLibraryA` + `GetProcAddress(hMod, MAKEINTRESOURCE(ord))`.
+
+#### 6. Modern OS Security Mitigations
+* **W^X and DEP Memory Protection**:
+  Flat binaries require executable memory pages (allocated with `PAGE_EXECUTE_READWRITE` or switched from RW to RX via `VirtualProtect` before execution).
+* **Control Flow Guard (CFG) & Arbitrary Code Guard (ACG)**:
+  If the host process enforces strict Control Flow Guard (CFG), indirect calls into non-image dynamic memory trigger fast-fail `0xC0000409` unless registered via `SetProcessValidCallTargets`. If Arbitrary Code Guard (ACG) is enabled on the host, allocating executable memory dynamically is blocked by the Windows kernel.
 
 ---
 

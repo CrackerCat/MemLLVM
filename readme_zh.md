@@ -72,11 +72,13 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 
 ---
 
-## 🎯 99.5% 开发场景覆盖矩阵与局限性
+## 🎯 工业级技术能力覆盖与现实架构边界深度剖析
 
-经过大量严苛的工业级项目实测，MemLLVM 已能够覆盖 **超过 99.5% 的常见现代 C 与 C++ 开发场景**，几乎所有成熟的第三方开源库均可不改一行源码直接编译为纯内存运行镜像。
+MemLLVM 攻克了 C++20 语言层、虚表重定位、原子初始化、内存堆管理与 C++ 异常展开的核心难关，实现了纯内存环境下前所未有的 C++ 语言完整度。然而，**从底层系统架构与操作系统契约的角度审视**，完全脱离操作系统 PE 加载器（Loaderless Execution）在现实开发中必然面临一系列客观存在的**环境割裂与系统契约边界**。
 
-### ✅ 已经全面支持的开发场景（覆盖 > 99.5%）：
+开发者在设计或移植大型项目时，必须充分认知并遵循以下六大核心维度的技术约束与最佳实践：
+
+### ✅ 编译器与语言层已全面突破的场景：
 
 | 开发维度 | 全面支持的技术能力 |
 | :--- | :--- |
@@ -91,18 +93,49 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 
 ---
 
-### ⚠️ 目前明确不支持的边缘场景（剩余不足 0.5%）及攻坚路线：
+### ⚠️ 纯内存无加载器环境下的 6 大现实技术边界与避坑准则：
 
-在完全脱离操作系统 PE 加载器的前提下，由于软硬件底层的天然壁垒，目前有且仅有以下两项技术边界暂时无法直接使用：
+#### 1. 模块身份与文件系统路径割裂（Module Identity & Filesystem Context）
+* **`GetModuleHandle(NULL)` 与 `GetModuleFileName` 身份伪造陷阱**：
+  在裸内存运行模式下，操作系统并没有为当前扁平二进制分配独立的 `HMODULE`。任何代码或第三方库若调用 `GetModuleHandle(NULL)` 或 `GetModuleFileName(NULL, ...)` 试图定位“自身所在目录”以加载同级数据（如游戏资源、字体、SQLite 数据库、配置文件），实际拿到的都会是**宿主宿主进程（如 `explorer.exe` 或加载器）的绝对路径**！
+  - **避坑准则**：严禁依赖 `GetModuleFileName(NULL)` 寻找相对资产，统一通过显式绝对路径、内存内联资产（静态字节数组）或由入口函数传参指定。
+* **当前工作目录（CWD）依赖风险**：
+  相对路径（如 `fopen("config.ini", "r")`）完全取决于宿主进程的当前工作目录（Current Directory）。若宿主工作目录与预期不符会导致文件打开失败。
 
-1. **Windows PE 资源编译器文件 (`.rsrc` / RC 资源)**：
-   - **根本原因**：扁平二进制不存在 PE 节头与资源目录树（Resource Directory Tree）。传统 Win32 API（如 `FindResource`、`LoadIcon`、`LoadAccelerators`）依赖由系统分配的 `HMODULE` 句柄寻址 PE 资源。
-   - **当前要求**：贴图、字体、音频、着色器等静态资产需以内联二进制数组（如十六进制 C 数组）或伴生数据包文件（如 `doom1.wad`）方式载入。
-   - **后续攻坚方案**：计划引入内存虚拟 PE 资源包挂载与伪 `HMODULE` 拦截器。
+#### 2. 操作系统加载器与 PE 结构级特性缺失（Absence of OS Loader Facilities）
+* **原生 PE 资源系统（`.rsrc` / RC 资源 / 图标 / 对话框模板）**：
+  扁平二进制剥离了所有 PE 节头与 Resource Directory 树。原生 Win32 资源 API（如 `FindResource`、`LoadIcon`、`LoadAccelerators`、`DialogBox`）无法使用。
+  - **避坑准则**：贴图、字体、音效、着色器等静态资产请以内联二进制数组（如十六进制 C 数组）或伴生数据包文件（如 `doom1.wad`、独立 sqlite 库）方式加载。
+* **Windows 清单与现代控件视觉样式（Manifest, ComCtl32 v6 & High-DPI）**：
+  传统 PE 依靠内嵌清单（`RT_MANIFEST`）启用 Common Controls v6 现代视觉样式及高 DPI 感知。在裸二进制下，Win32 原生控件默认回退到 Windows 2000 经典扁平灰色风格。
+  - **避坑准则**：如需现代视觉外观，建议采用 Direct2D / DirectX 11 / Dear ImGui 自绘渲染管线，或在代码中显式调用 `CreateActCtx` 挂载清单并调用 `SetProcessDpiAwarenessContext`。
+* **原生命名空间级 `thread_local` 与 TLS 回调（TLS Callbacks）**：
+  局部静态单例虽然已被 IR 改写为原子 CAS 解决，但全局命名空间或类静态的 `thread_local` 变量仍旧依赖操作系统 PE 引导分配的 `__tls_index` 与 TEB 槽位。此外，操作系统在创建/销毁新线程时，无法主动触发扁平二进制内的 TLS 回调（`PIMAGE_TLS_CALLBACK`）。
+  - **避坑准则**：跨线程私有数据推荐直接调用 Win32 原生 TLS API（`TlsAlloc`、`TlsGetValue`、`TlsSetValue`）。
 
-2. **原生 C++ `thread_local` 关键字**：
-   - **根本原因**：原生 `thread_local` 依赖操作系统 PE 引导分配 `__tls_index` 并由系统在线程创建时分配 TEB 槽位。
-   - **当前要求**：若业务强依赖线程私有存储，请直接调用 Win32 原生 TLS API（`TlsAlloc`、`TlsGetValue`、`TlsSetValue`）。（注：局部静态变量的 Meyers 单例已通过原子 CAS 改写获得 100% 支持）。
+#### 3. 执行形态与导出接口约束（Execution Morphology & Library Boundary）
+* **单入口执行体模型（Single Entry Point），无动态符号导出表（No EAT）**：
+  MemLLVM 输出的是单一扁平入口（Offset 0 自重定位后跳转到 `main`）的执行体，**无法作为多函数共享动态链接库（DLL）导出数十个具名符号供外部第三方程序按名动态调用**。它是一个纯粹的任务载荷/可执行体模型，而非动态共享库导出模型。
+* **纯 64 位单架构生态（Strictly x64 Architecture Only）**：
+  全套编译管线（PE 解析、DIR64 修复、ROR13 API 寻址引擎、`.pdata` 12 字节展开表、自举汇编 Stub）深度绑定于 **Windows x86_64 ABI**。目前**不兼容 32 位 x86（IA-32）**（其使用 FS 段寄存器、HIGHLOW 重定位及链表式 SEH 栈帧）与 **ARM64**。
+
+#### 4. 进程生命周期与宿主共生耦合（Host Process Lifecycle Coupling）
+* **`exit()` / `abort()` 宿主连带杀死风险**：
+  在独立 EXE 中，调用标准库 `exit(code)` 正常终结进程是标准行为；但在将扁平二进制嵌入宿主进程运行的模式下，调用 `exit()` 或 `abort()` 会直接触发 `ExitProcess`，**导致宿主进程被瞬间连带杀死**！
+  - **避坑准则**：若希望载荷像子程序一样平稳退出并将控制权还给宿主，必须通过 `main()` 正常 `return` 或调用 `ExitThread`，严禁在嵌入模式下随意调用 `exit()`。
+* **直接命令行查询污染（`GetCommandLine`）**：
+  Win32 API `GetCommandLineA/W` 查询的是宿主进程在操作系统创建时的全局命令行字符串。虽然 MemLLVM 的引导桩能够重构 `main(argc, argv)`，但若第三方库绕过 `main` 的参数直接调用 `GetCommandLineW()`，将读到宿主进程的命令参数。
+
+#### 5. 符号动态解析的边界与限制（API Dynamic Resolution Limits）
+* **仅按序数导出（Ordinal-Only）的隐式导入无法自动解析**：
+  MemLLVM 的 `ApiResolvePass` 与自举解析器依赖遍历 PE 导出表的名称表（`AddressOfNames`）并计算 ROR13 哈希。对于极少数仅通过序号导出、不包含函数名的 API（如部分老旧 Winsock、COM 内部函数或 Shell 专有接口），无法通过名称哈希自动内联解析。
+  - **避坑准则**：对于无名序数导出，需在代码中显式通过 `LoadLibraryA` + `GetProcAddress(hMod, MAKEINTRESOURCE(ord))` 获取。
+
+#### 6. 现代操作系统安全防护策略对抗（OS Security Mitigations）
+* **W^X 与 DEP 内存执行权限**：
+  载荷必须放置在具有执行权限的内存页（RWX 或在执行前通过 `VirtualProtect` 将 RW 切换为 RX）。
+* **控制流防护（Control Flow Guard / CFG）与 ACG 限制**：
+  若宿主进程开启了强制控制流防护（CFG），在未调用 `SetProcessValidCallTargets` 登记内存函数入口的情况下，间接跳转可能会触发 `0xC0000409`（FAST_FAIL_CONTROL_FLOW_GUARD_CHECK_FAILURE）；若宿主开启了 Arbitrary Code Guard (ACG)，则操作系统内核直接禁止在进程内创建或修改可执行代码页。
 
 ---
 
