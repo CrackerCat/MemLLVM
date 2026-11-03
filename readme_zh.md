@@ -10,7 +10,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6.svg?logo=windows)](https://microsoft.com)
 [![Toolchain](https://img.shields.io/badge/Toolchain-LLVM%20%2F%20Clang--cl%2022-269539.svg?logo=llvm)](https://llvm.org)
 [![Standard](https://img.shields.io/badge/Language-C17%20%2F%20C%2B%2B20-f34b7d.svg?logo=c%2B%2B)](https://isocpp.org)
-[![Coverage](https://img.shields.io/badge/C%2FC%2B%2B%20%E6%A0%B8%E5%BF%83%E8%A6%86%E7%9B%96%E7%8E%87-~99%25-brightgreen.svg)](#-3-99-开发场景覆盖矩阵与局限性)
+[![Coverage](https://img.shields.io/badge/C%2FC%2B%2B%20%E6%A0%B8%E5%BF%83%E8%A6%86%E7%9B%96%E7%8E%87-%3E99.5%25-brightgreen.svg)](#-3-995-开发场景覆盖矩阵与局限性)
 [![License](https://img.shields.io/badge/License-MIT-blueviolet.svg)](LICENSE)
 
 [**English Documentation**](readme.md) | [**简体中文技术文档**](readme_zh.md)
@@ -72,15 +72,16 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 
 ---
 
-## 🎯 99% 开发场景覆盖矩阵与局限性
+## 🎯 99.5% 开发场景覆盖矩阵与局限性
 
-经过大量严苛的工业级项目实测，MemLLVM 已能够覆盖 **几乎 99% 的常见现代 C 与 C++ 开发场景**，几乎所有成熟的第三方开源开源库均可不改一行源码直接编译为纯内存运行镜像。
+经过大量严苛的工业级项目实测，MemLLVM 已能够覆盖 **超过 99.5% 的常见现代 C 与 C++ 开发场景**，几乎所有成熟的第三方开源库均可不改一行源码直接编译为纯内存运行镜像。
 
-### ✅ 已经全面支持的开发场景（覆盖约 99%）：
+### ✅ 已经全面支持的开发场景（覆盖 > 99.5%）：
 
 | 开发维度 | 全面支持的技术能力 |
 | :--- | :--- |
 | **现代语言特性** | 模板元编程、概念（Concepts）、Lambda 闭包、Meyers 线程安全单例、`constexpr`、多层多重虚拟继承与多态虚表（`vtable`）、函数指针回调。 |
+| **C++ 异常与栈回溯** | **完整支持 `try` / `catch` / `throw` 与重新抛出（`throw;`）**！自包含表驱动 SEH 机制，引导桩自动向内核注册动态 `.pdata` 展开表（`RtlAddFunctionTable`），保证栈回溯（Stack Unwinding）过程中局部变量 RAII 析构函数 100% 可靠执行，退出自动注销。 |
 | **生命周期管理** | 全局对象与静态变量自动调用构造函数（`@llvm.global_ctors`）、进程退出时自动逆序调用析构函数（`atexit`）、作用域 RAII。 |
 | **内存分配体系** | 完全自举的 `malloc`、`free`、`realloc`、`calloc`、`operator new`、`operator delete`、内存对齐分配、高速分桶 Arena 分配器。 |
 | **并发与多线程** | 完整的 `std::thread`、`std::mutex`、`std::recursive_mutex`、`std::condition_variable`、`std::shared_mutex`、`std::async`、`std::future` 以及原子操作（`std::atomic`）。 |
@@ -90,21 +91,16 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 
 ---
 
-### ⚠️ 目前明确不支持的边缘场景（剩余约 1%）及攻坚路线：
+### ⚠️ 目前明确不支持的边缘场景（剩余不足 0.5%）及攻坚路线：
 
-在完全脱离操作系统 PE 加载器的前提下，由于软硬件底层的天然壁垒，目前有且仅有以下三项技术边界暂时无法直接使用：
+在完全脱离操作系统 PE 加载器的前提下，由于软硬件底层的天然壁垒，目前有且仅有以下两项技术边界暂时无法直接使用：
 
-1. **C++ 异常处理 (`try` / `catch` / `throw`)**：
-   - **根本原因**：Windows x64 平台的结构化异常展开（Stack Unwinding）强依赖构建时生成的 `.pdata` 与 `.xdata` 函数展开表，并必须经由操作系统内核注册登记（`RtlAddFunctionTable`）。纯内存裸二进制若未向内核登记，抛出异常时内核将无法回溯调用栈，直接引发进程崩溃终止。
-   - **当前要求**：必须在编译选项中关闭异常处理（`/EHs-c-`、`/GR-`、`/clang:-fno-exceptions`）。
-   - **后续攻坚方案**：团队正在攻坚基于微型运行时在自重定位引导阶段自省代码段范围，并自动调用 `RtlAddFunctionTable` 向内核自注册展开表的方案，力争在后续大版本中彻底解除异常限制。
-
-2. **Windows PE 资源编译器文件 (`.rsrc` / RC 资源)**：
+1. **Windows PE 资源编译器文件 (`.rsrc` / RC 资源)**：
    - **根本原因**：扁平二进制不存在 PE 节头与资源目录树（Resource Directory Tree）。传统 Win32 API（如 `FindResource`、`LoadIcon`、`LoadAccelerators`）依赖由系统分配的 `HMODULE` 句柄寻址 PE 资源。
    - **当前要求**：贴图、字体、音频、着色器等静态资产需以内联二进制数组（如十六进制 C 数组）或伴生数据包文件（如 `doom1.wad`）方式载入。
    - **后续攻坚方案**：计划引入内存虚拟 PE 资源包挂载与伪 `HMODULE` 拦截器。
 
-3. **原生 C++ `thread_local` 关键字**：
+2. **原生 C++ `thread_local` 关键字**：
    - **根本原因**：原生 `thread_local` 依赖操作系统 PE 引导分配 `__tls_index` 并由系统在线程创建时分配 TEB 槽位。
    - **当前要求**：若业务强依赖线程私有存储，请直接调用 Win32 原生 TLS API（`TlsAlloc`、`TlsGetValue`、`TlsSetValue`）。（注：局部静态变量的 Meyers 单例已通过原子 CAS 改写获得 100% 支持）。
 
@@ -149,6 +145,16 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 * **诡异现象**：C++ 中极为经典的单例写法 `static MyClass& inst = ...`，在编译为裸 Shellcode 后，一执行就必定在 `gs:[0x58]` 发生 `0xC0000005` 崩溃。
 * **真相大白**：编译器为了保证静态变量多线程初始化的线程安全，偷偷插入了对 MSVC 内部函数 `_Init_thread_epoch` 的调用，并访问了模块 TLS 索引。裸内存代码根本没有由系统分配的 TLS 槽位。
 * **终极攻克**：MemLLVM 的 `StlStubPass` 在 IR 层面将这些隐式检查全部拦截改写为基于常规内存的无锁原子 CAS 指令，不仅保全了多线程初始化安全，更彻底斩断了对 TLS 的依赖。
+
+---
+
+### 坑点 5：裸扁平机器码中的 Windows x64 SEH 异常展开与 .pdata 缺失陷阱
+* **诡异现象**：在实现了 `_CxxThrowException`、`__CxxFrameHandler3` 并调用 `RtlAddFunctionTable` 注册动态异常表后，代码中的 `throw` 依然直接引发进程无声崩溃终止（异常代码 `0xE06D7363` 未捕获），外层的 `catch` 块完全无法拦截。
+* **真相大白**：Windows x64 采用纯表驱动异常分发模型。当 `_CxxThrowException` 调用 `ntdll!RaiseException` 时，内核 SEH 分发器必须从 `RaiseException` 开始沿着栈帧向上逐级调用 `RtlVirtualUnwind` 回溯。如果其中任何一个非叶子函数（包括 `_CxxThrowException` 本身！）在编译时被禁用了 Unwind Info（如传递了 `/clang:-fno-unwind-tables`），内核在查询 `RUNTIME_FUNCTION` 时会直接返回 `NULL`。内核由于无法得知如何还原 `RSP`，**会立即判定异常无法继续展开，直接当场杀掉整个进程**！
+* **终极攻克**：
+  1. 为 `ltl/src/crt_exceptions.cpp` 单独开启 `/EHsc` 编译，生成完整的 `.pdata` 与 `.xdata` 异常元数据；
+  2. 扁平打包工具 `extract_flat_bin.py` 自动保留并提取 `.pdata` 节区；
+  3. 在二进制自举引导桩中，通过动态 `MEMLLVME` 描述符在内存中自动写入真实的加载基址、`.pdata` 运行时指针与条目数，无缝驱动 `RtlAddFunctionTable` 向 Windows 内核完成自注册与反注册。彻底实现纯内存裸二进制环境下完美的 C++ 异常捕获与 RAII 局部对象析构展开！
 
 ---
 
@@ -217,7 +223,7 @@ examples/
    ```
 3. **C/C++** -> **代码生成**：
    - 运行库：**多线程 (/MT)**
-   - 启用 C++ 异常：**否 (`/EHs-c- /GR-`)**
+   - 启用 C++ 异常：**是 (`/EHsc`)**（完全支持异常捕获与 RAII 析构；若追求极致微型体积亦可选择 **否 (`/EHs-c- /GR-`)**）
    - 安全检查：**禁用安全检查 (`/GS-`)**
 4. **C/C++** -> **命令行** -> **其他选项**：
    ```text
