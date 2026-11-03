@@ -111,6 +111,7 @@ int memcmp(const void* s1, const void* s2, size_t n) {
 
 #pragma function(strlen)
 size_t strlen(const char* s) {
+    if (!s) return 0;
     size_t len;
     __asm__ volatile(
         "xorl %%eax, %%eax\n\t"
@@ -127,6 +128,7 @@ size_t strlen(const char* s) {
 
 #pragma function(wcslen)
 size_t wcslen(const wchar_t* s) {
+    if (!s) return 0;
     size_t len;
     __asm__ volatile(
         "xorl %%eax, %%eax\n\t"
