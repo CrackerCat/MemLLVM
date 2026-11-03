@@ -218,38 +218,8 @@ static bool transformGlobalString(GlobalVariable *GV, Module &M) {
 }
 
 PreservedAnalyses StackStringPass::run(Module &M, ModuleAnalysisManager &MAM) {
-  if (getenv("MEMLLVM_VERBOSE")) {
-    errs() << "[MemLLVM] Running StackStringPass on module: " << M.getName() << "\n";
-  }
-
-  if (getenv("MEMLLVM_DISABLE_STACK_STRINGS")) {
-    if (getenv("MEMLLVM_VERBOSE")) {
-      errs() << "[MemLLVM] StackStringPass skipped (MEMLLVM_DISABLE_STACK_STRINGS is set)\n";
-    }
-    return PreservedAnalyses::all();
-  }
-
-  SmallVector<GlobalVariable *, 16> GlobalsToTransform;
-  for (GlobalVariable &GV : M.globals()) {
-    if (canTransformGlobalString(&GV)) {
-      GlobalsToTransform.push_back(&GV);
-    }
-  }
-
-  unsigned TransformedCount = 0;
-  for (GlobalVariable *GV : GlobalsToTransform) {
-    if (transformGlobalString(GV, M)) {
-      TransformedCount++;
-    }
-  }
-
-  if (getenv("MEMLLVM_VERBOSE") || TransformedCount > 0) {
-    errs() << "[MemLLVM] StackStringPass: Transformed "
-           << TransformedCount << " global string(s).\n";
-  }
-
-  if (TransformedCount > 0)
-    return PreservedAnalyses::none();
+  // String stackification obfuscation completely removed per specification.
+  // All string literals remain pure read-only constant data in .rdata / data section.
   return PreservedAnalyses::all();
 }
 

@@ -13,7 +13,6 @@ static void runPipeline(ModulePassManager &MPM) {
   MPM.addPass(memllvm::GlobalSectionPass());
   MPM.addPass(memllvm::GlobalPointerPass());
   MPM.addPass(memllvm::AutoLoadLibraryPass());
-  MPM.addPass(memllvm::StackStringPass());
   MPM.addPass(memllvm::ApiResolvePass());
 }
 
