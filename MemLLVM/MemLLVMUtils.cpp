@@ -77,6 +77,10 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "_lock_file" || Name == "_unlock_file" ||
       Name.contains("__ExceptionPtr") ||
       Name == "memcpy" || Name == "memmove" || Name == "memset" ||
+      Name == "strlen" || Name == "wcslen" || Name == "strcpy" || Name == "strncpy" ||
+      Name == "GetCurrentThreadId" || Name == "GetCurrentProcessId" ||
+      Name == "GetProcessHeap" || Name == "GetStdHandle" ||
+      Name == "_wassert" || Name == "_assert" ||
       Name == "floor" || Name == "ceil" || Name == "round" ||
       Name == "floorf" || Name == "ceilf" ||
       Name == "strcmp" || Name == "strncmp" || Name == "_strnicmp" ||

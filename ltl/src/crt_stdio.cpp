@@ -185,7 +185,30 @@ struct WideSink {
     }
 
     void puts(const wchar_t* s, size_t len) {
-        for (size_t i = 0; i < len; ++i) put(s[i]);
+        if (!s || len == 0) return;
+        while (len > 0) {
+            if (user_buf) {
+                size_t avail = (user_max > total_written + 1) ? (user_max - total_written - 1) : 0;
+                size_t to_copy = (len < avail) ? len : avail;
+                if (to_copy > 0) {
+                    memcpy(user_buf + total_written, s, to_copy * sizeof(wchar_t));
+                }
+                total_written += len;
+                break;
+            } else {
+                size_t cap = sizeof(local_buf) / sizeof(wchar_t);
+                size_t avail = cap - local_count;
+                size_t to_copy = (len < avail) ? len : avail;
+                if (to_copy > 0) {
+                    memcpy(local_buf + local_count, s, to_copy * sizeof(wchar_t));
+                    local_count += to_copy;
+                    total_written += to_copy;
+                    s += to_copy;
+                    len -= to_copy;
+                }
+                if (local_count >= cap) flush();
+            }
+        }
     }
 
     void finish() {
@@ -238,7 +261,29 @@ struct NarrowSink {
     }
 
     void puts(const char* s, size_t len) {
-        for (size_t i = 0; i < len; ++i) put(s[i]);
+        if (!s || len == 0) return;
+        while (len > 0) {
+            if (user_buf) {
+                size_t avail = (user_max > total_written + 1) ? (user_max - total_written - 1) : 0;
+                size_t to_copy = (len < avail) ? len : avail;
+                if (to_copy > 0) {
+                    memcpy(user_buf + total_written, s, to_copy);
+                }
+                total_written += len;
+                break;
+            } else {
+                size_t avail = sizeof(local_buf) - local_count;
+                size_t to_copy = (len < avail) ? len : avail;
+                if (to_copy > 0) {
+                    memcpy(local_buf + local_count, s, to_copy);
+                    local_count += to_copy;
+                    total_written += to_copy;
+                    s += to_copy;
+                    len -= to_copy;
+                }
+                if (local_count >= sizeof(local_buf)) flush();
+            }
+        }
     }
 
     void finish() {
@@ -1099,13 +1144,15 @@ int __cdecl __acrt_stdio_flush_and_write_wide_data(wchar_t const c, void* stream
     return c;
 }
 
+extern "C" size_t strlen(const char* s);
+extern "C" size_t wcslen(const wchar_t* s);
+
 int __cdecl puts(const char* s) {
     if (!s) return -1;
     HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
     if (!h || h == INVALID_HANDLE_VALUE) h = GetStdHandle(STD_ERROR_HANDLE);
     DWORD written = 0;
-    size_t len = 0;
-    while (s[len]) ++len;
+    size_t len = strlen(s);
     WriteFile(h, s, static_cast<DWORD>(len), &written, nullptr);
     WriteFile(h, "\n", 1, &written, nullptr);
     return static_cast<int>(len + 1);
@@ -1115,8 +1162,7 @@ int __cdecl fputs(const char* s, void* stream) {
     if (!s) return -1;
     HANDLE h = get_output_handle(stream);
     DWORD written = 0;
-    size_t len = 0;
-    while (s[len]) ++len;
+    size_t len = strlen(s);
     WriteFile(h, s, static_cast<DWORD>(len), &written, nullptr);
     return static_cast<int>(len);
 }
@@ -1124,8 +1170,7 @@ int __cdecl fputs(const char* s, void* stream) {
 int __cdecl fputws(const wchar_t* s, void* stream) {
     if (!s) return -1;
     HANDLE h = get_output_handle(stream);
-    size_t len = 0;
-    while (s[len]) ++len;
+    size_t len = wcslen(s);
     LtlFile* lf = reinterpret_cast<LtlFile*>(stream);
     if (lf && lf->magic == 0x4C544C46 && !lf->is_std) {
         DWORD written = 0;

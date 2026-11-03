@@ -25,6 +25,12 @@ extern "C" {
 // Mutex implementation
 // ----------------------------------------------------------------------------
 
+static inline long get_cur_thread_id() noexcept {
+    unsigned long tid;
+    __asm__ volatile("movl %%gs:0x48, %0" : "=r"(tid));
+    return static_cast<long>(tid);
+}
+
 void __cdecl _Mtx_init_in_situ(_Mtx_t mtx, int type) noexcept {
     mtx->_Type = type;
     mtx->_Critical_section._Unused = nullptr;
@@ -36,12 +42,12 @@ void __cdecl _Mtx_init_in_situ(_Mtx_t mtx, int type) noexcept {
 void __cdecl _Mtx_destroy_in_situ(_Mtx_t) noexcept {}
 
 int __cdecl _Mtx_current_owns(_Mtx_t mtx) noexcept {
-    long cur_id = static_cast<long>(GetCurrentThreadId());
+    long cur_id = get_cur_thread_id();
     return (mtx && mtx->_Thread_id == cur_id) ? 1 : 0;
 }
 
 _Thrd_result __cdecl _Mtx_lock(_Mtx_t mtx) noexcept {
-    long cur_id = static_cast<long>(GetCurrentThreadId());
+    long cur_id = get_cur_thread_id();
     if (mtx->_Type == _Mtx_plain || mtx->_Type == (_Mtx_plain | _Mtx_try)) {
         if (mtx->_Thread_id != cur_id) {
             AcquireSRWLockExclusive(get_srw_lock(mtx));
@@ -62,7 +68,7 @@ _Thrd_result __cdecl _Mtx_lock(_Mtx_t mtx) noexcept {
 }
 
 _Thrd_result __cdecl _Mtx_trylock(_Mtx_t mtx) noexcept {
-    long cur_id = static_cast<long>(GetCurrentThreadId());
+    long cur_id = get_cur_thread_id();
     if (mtx->_Type != _Mtx_plain && mtx->_Type != (_Mtx_plain | _Mtx_try) && mtx->_Thread_id == cur_id) {
         ++mtx->_Count;
         return _Thrd_result::_Success;
@@ -208,7 +214,7 @@ _Thrd_result __cdecl _Thrd_detach(_Thrd_t thr) noexcept {
 }
 
 _Thrd_id_t __cdecl _Thrd_id() noexcept {
-    return static_cast<unsigned int>(GetCurrentThreadId());
+    return static_cast<unsigned int>(get_cur_thread_id());
 }
 
 void __cdecl _Thrd_yield() noexcept {

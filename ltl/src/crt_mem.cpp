@@ -60,36 +60,28 @@ int __C_specific_handler(void* ExceptionRecord, void* EstablisherFrame,
 
 #pragma function(memcpy)
 void* memcpy(void* dest, const void* src, size_t count) {
-    char* d = static_cast<char*>(dest);
-    const char* s = static_cast<const char*>(src);
-    for (size_t i = 0; i < count; ++i) {
-        d[i] = s[i];
-    }
+    void* d = dest;
+    __asm__ volatile("rep movsb" : "+D"(d), "+S"(src), "+c"(count) :: "memory");
     return dest;
 }
 
 #pragma function(memmove)
 void* memmove(void* dest, const void* src, size_t count) {
-    char* d = static_cast<char*>(dest);
-    const char* s = static_cast<const char*>(src);
-    if (d < s) {
-        for (size_t i = 0; i < count; ++i) {
-            d[i] = s[i];
-        }
-    } else if (d > s) {
-        for (size_t i = count; i > 0; --i) {
-            d[i - 1] = s[i - 1];
-        }
+    void* d = dest;
+    if (dest <= src || (const char*)dest >= (const char*)src + count) {
+        __asm__ volatile("rep movsb" : "+D"(d), "+S"(src), "+c"(count) :: "memory");
+    } else {
+        d = (char*)dest + count - 1;
+        src = (const char*)src + count - 1;
+        __asm__ volatile("std; rep movsb; cld" : "+D"(d), "+S"(src), "+c"(count) :: "memory");
     }
     return dest;
 }
 
 #pragma function(memset)
 void* memset(void* dest, int c, size_t count) {
-    char* d = static_cast<char*>(dest);
-    for (size_t i = 0; i < count; ++i) {
-        d[i] = static_cast<char>(c);
-    }
+    void* d = dest;
+    __asm__ volatile("rep stosb" : "+D"(d), "+c"(count) : "a"((unsigned char)c) : "memory");
     return dest;
 }
 
@@ -97,12 +89,108 @@ void* memset(void* dest, int c, size_t count) {
 // gets optimised straight back into a recursive call to memcmp.
 #pragma function(memcmp)
 int memcmp(const void* s1, const void* s2, size_t n) {
-    const unsigned char* p1 = static_cast<const unsigned char*>(s1);
-    const unsigned char* p2 = static_cast<const unsigned char*>(s2);
-    for (size_t i = 0; i < n; ++i) {
-        if (p1[i] != p2[i]) return (int)p1[i] - (int)p2[i];
-    }
-    return 0;
+    if (!n) return 0;
+    int res = 0;
+    __asm__ volatile(
+        "repe cmpsb\n\t"
+        "jz 1f\n\t"
+        "movzbl -1(%%rsi), %%eax\n\t"
+        "movzbl -1(%%rdi), %%edx\n\t"
+        "subl %%edx, %%eax\n\t"
+        "1:\n\t"
+        : "=a"(res), "+S"(s1), "+D"(s2), "+c"(n)
+        :: "edx", "cc"
+    );
+    return res;
+}
+
+#pragma function(strlen)
+size_t strlen(const char* s) {
+    size_t len;
+    __asm__ volatile(
+        "xorl %%eax, %%eax\n\t"
+        "movq $-1, %%rcx\n\t"
+        "repne scasb\n\t"
+        "notq %%rcx\n\t"
+        "decq %%rcx\n\t"
+        : "=c"(len), "+D"(s)
+        :
+        : "al", "cc"
+    );
+    return len;
+}
+
+#pragma function(wcslen)
+size_t wcslen(const wchar_t* s) {
+    size_t len;
+    __asm__ volatile(
+        "xorl %%eax, %%eax\n\t"
+        "movq $-1, %%rcx\n\t"
+        "repne scasw\n\t"
+        "notq %%rcx\n\t"
+        "decq %%rcx\n\t"
+        : "=c"(len), "+D"(s)
+        :
+        : "ax", "cc"
+    );
+    return len;
+}
+
+void __cdecl _wassert(const wchar_t* msg, const wchar_t* file, unsigned line) {
+    (void)msg; (void)file; (void)line;
+    ExitProcess(0xc0000420);
+}
+
+void __cdecl _assert(const char* msg, const char* file, unsigned line) {
+    (void)msg; (void)file; (void)line;
+    ExitProcess(0xc0000420);
+}
+
+char* strcpy(char* dest, const char* src) {
+    char* d = dest;
+    while ((*d++ = *src++));
+    return dest;
+}
+
+char* strncpy(char* dest, const char* src, size_t n) {
+    char* d = dest;
+    while (n && (*d++ = *src++)) --n;
+    while (n--) *d++ = '\0';
+    return dest;
+}
+
+unsigned long __stdcall GetCurrentThreadId() {
+    unsigned long tid;
+    __asm__ volatile("movl %%gs:0x48, %0" : "=r"(tid));
+    return tid;
+}
+
+unsigned long __stdcall GetCurrentProcessId() {
+    unsigned long pid;
+    __asm__ volatile("movl %%gs:0x40, %0" : "=r"(pid));
+    return pid;
+}
+
+void* __stdcall GetProcessHeap() {
+    void* heap;
+    __asm__ volatile(
+        "movq %%gs:0x60, %0\n\t"
+        "movq 0x30(%0), %0"
+        : "=r"(heap)
+    );
+    return heap;
+}
+
+void* __stdcall GetStdHandle(unsigned long nStdHandle) {
+    uint8_t* peb;
+    __asm__ volatile("movq %%gs:0x60, %0" : "=r"(peb));
+    if (!peb) return (void*)-1;
+    uint8_t* params = *reinterpret_cast<uint8_t**>(peb + 0x20);
+    if (!params) return (void*)-1;
+    if (nStdHandle == static_cast<unsigned long>(-10)) return *reinterpret_cast<void**>(params + 0x20);
+    if (nStdHandle == static_cast<unsigned long>(-11)) return *reinterpret_cast<void**>(params + 0x28);
+    if (nStdHandle == static_cast<unsigned long>(-12)) return *reinterpret_cast<void**>(params + 0x30);
+    return (void*)-1;
 }
 
 float ceilf(float x) {
@@ -335,30 +423,63 @@ __asm__(
 );
 
 const void* __stdcall __std_find_trivial_2(const void* _First, const void* _Last, uint16_t _Val) noexcept {
-    const uint16_t* p = static_cast<const uint16_t*>(_First);
-    const uint16_t* end = static_cast<const uint16_t*>(_Last);
-    for (; p != end; ++p) {
-        if (*p == _Val) return p;
-    }
-    return end;
+    size_t count = static_cast<const uint16_t*>(_Last) - static_cast<const uint16_t*>(_First);
+    if (!count) return _Last;
+    const void* res = _First;
+    __asm__ volatile(
+        "repne scasw\n\t"
+        "jnz 1f\n\t"
+        "subq $2, %%rdi\n\t"
+        "movq %%rdi, %0\n\t"
+        "jmp 2f\n\t"
+        "1:\n\t"
+        "movq %1, %0\n\t"
+        "2:\n\t"
+        : "=r"(res)
+        : "r"(_Last), "0"(res), "a"(_Val), "c"(count), "D"(res)
+        : "cc"
+    );
+    return res;
 }
 
 const void* __stdcall __std_find_trivial_4(const void* _First, const void* _Last, uint32_t _Val) noexcept {
-    const uint32_t* p = static_cast<const uint32_t*>(_First);
-    const uint32_t* end = static_cast<const uint32_t*>(_Last);
-    for (; p != end; ++p) {
-        if (*p == _Val) return p;
-    }
-    return end;
+    size_t count = static_cast<const uint32_t*>(_Last) - static_cast<const uint32_t*>(_First);
+    if (!count) return _Last;
+    const void* res = _First;
+    __asm__ volatile(
+        "repne scasl\n\t"
+        "jnz 1f\n\t"
+        "subq $4, %%rdi\n\t"
+        "movq %%rdi, %0\n\t"
+        "jmp 2f\n\t"
+        "1:\n\t"
+        "movq %1, %0\n\t"
+        "2:\n\t"
+        : "=r"(res)
+        : "r"(_Last), "0"(res), "a"(_Val), "c"(count), "D"(res)
+        : "cc"
+    );
+    return res;
 }
 
 const void* __stdcall __std_find_trivial_8(const void* _First, const void* _Last, uint64_t _Val) noexcept {
-    const uint64_t* p = static_cast<const uint64_t*>(_First);
-    const uint64_t* end = static_cast<const uint64_t*>(_Last);
-    for (; p != end; ++p) {
-        if (*p == _Val) return p;
-    }
-    return end;
+    size_t count = static_cast<const uint64_t*>(_Last) - static_cast<const uint64_t*>(_First);
+    if (!count) return _Last;
+    const void* res = _First;
+    __asm__ volatile(
+        "repne scasq\n\t"
+        "jnz 1f\n\t"
+        "subq $8, %%rdi\n\t"
+        "movq %%rdi, %0\n\t"
+        "jmp 2f\n\t"
+        "1:\n\t"
+        "movq %1, %0\n\t"
+        "2:\n\t"
+        : "=r"(res)
+        : "r"(_Last), "0"(res), "a"(_Val), "c"(count), "D"(res)
+        : "cc"
+    );
+    return res;
 }
 
 size_t __stdcall __std_count_trivial_1(const void* _First, const void* _Last, uint8_t _Val) noexcept {
@@ -443,7 +564,6 @@ extern "C" void* const __imp_GetActiveProcessorCount = (void*)GetActiveProcessor
 
 void* __stdcall GetCommandLineW();
 wchar_t** __stdcall CommandLineToArgvW(const wchar_t* lpCmdLine, int* pNumArgs);
-void* __stdcall GetProcessHeap();
 void* __stdcall HeapAlloc(void* hHeap, unsigned int dwFlags, size_t dwBytes);
 int __stdcall WideCharToMultiByte(unsigned int CodePage, unsigned int dwFlags,
                                   const wchar_t* lpWideCharStr, int cchWideChar,

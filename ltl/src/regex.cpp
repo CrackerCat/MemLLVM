@@ -13,13 +13,23 @@
 extern "C" {
 
 const void* __stdcall __std_find_trivial_1(const void* _First, const void* _Last, uint8_t _Val) noexcept {
-    const uint8_t* cur = (const uint8_t*)_First;
-    const uint8_t* end = (const uint8_t*)_Last;
-    while (cur != end) {
-        if (*cur == _Val) return cur;
-        ++cur;
-    }
-    return end;
+    size_t count = (const uint8_t*)_Last - (const uint8_t*)_First;
+    if (!count) return _Last;
+    const void* res = _First;
+    __asm__ volatile(
+        "repne scasb\n\t"
+        "jnz 1f\n\t"
+        "decq %%rdi\n\t"
+        "movq %%rdi, %0\n\t"
+        "jmp 2f\n\t"
+        "1:\n\t"
+        "movq %1, %0\n\t"
+        "2:\n\t"
+        : "=r"(res)
+        : "r"(_Last), "0"(res), "a"(_Val), "c"(count), "D"(res)
+        : "cc"
+    );
+    return res;
 }
 
 const void* __stdcall __std_find_first_of_trivial_1(
