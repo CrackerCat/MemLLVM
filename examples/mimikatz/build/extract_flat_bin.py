@@ -178,6 +178,12 @@ def build_stub(stub_offset, orig_base, entry_offset, num_relocs,
     """Emit the x64 self-rebase stub. Identical encoding to build_chip8.py."""
     code = bytearray()
 
+    # 0. Preserve caller argument registers (rcx, rdx, r8, r9).
+    code.extend(b'\x51')                              # push rcx
+    code.extend(b'\x52')                              # push rdx
+    code.extend(b'\x41\x50')                          # push r8
+    code.extend(b'\x41\x51')                          # push r9
+
     # 1. Get RIP into RDX, then turn it into the real load address of the blob.
     code.extend(b'\xE8\x00\x00\x00\x00\x5A')          # call $+5 ; pop rdx
     pop_rdx_off = len(code) - 1
@@ -213,9 +219,13 @@ def build_stub(stub_offset, orig_base, entry_offset, num_relocs,
     code.extend(b'\xC7\x02' + struct.pack('<I', orig_dw))
     code.extend(b'\xC6\x42\x04' + struct.pack('<B', orig_b))
 
-    # 6. jmp to the MemLLVM-synthesized entry point.
+    # 6. Compute entry point in rax, restore caller argument registers, and jmp.
     code.extend(b'\x48\x8D\x82' + struct.pack('<I', entry_offset))  # lea rax,[rdx+entry]
-    code.extend(b'\xFF\xE0')                                        # jmp rax
+    code.extend(b'\x41\x59')                          # pop r9
+    code.extend(b'\x41\x58')                          # pop r8
+    code.extend(b'\x5A')                              # pop rdx
+    code.extend(b'\x59')                              # pop rcx
+    code.extend(b'\xFF\xE0')                          # jmp rax
 
     return bytes(code)
 

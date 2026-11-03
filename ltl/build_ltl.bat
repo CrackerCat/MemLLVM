@@ -66,7 +66,10 @@ if %ERRORLEVEL% neq 0 exit /b 1
 "%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\crt_mem.cpp" /Fo"%LTL_ROOT%\src\crt_mem.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\stdio_thunk.cpp" /Fo"%LTL_ROOT%\src\stdio_thunk.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\stdio_printf.cpp" /Fo"%LTL_ROOT%\src\stdio_printf.obj"
+if %ERRORLEVEL% neq 0 exit /b 1
+
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\stdio_puts.cpp" /Fo"%LTL_ROOT%\src\stdio_puts.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
 "%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\iostream.cpp" /Fo"%LTL_ROOT%\src\iostream.obj"
@@ -82,7 +85,7 @@ if %ERRORLEVEL% neq 0 exit /b 1
 if %ERRORLEVEL% neq 0 exit /b 1
 
 echo [*] Archiving into ltl.lib...
-"%LIB_BIN%" /out:"%LTL_ROOT%\ltl.lib" "%LTL_ROOT%\src\concurrency.obj" "%LTL_ROOT%\src\emutls.obj" "%LTL_ROOT%\src\filesystem.obj" "%LTL_ROOT%\src\crt_mem.obj" "%LTL_ROOT%\src\stdio_thunk.obj" "%LTL_ROOT%\src\iostream.obj" "%LTL_ROOT%\src\locale.obj" "%LTL_ROOT%\src\regex.obj" "%LTL_ROOT%\src\async.obj"
+"%LIB_BIN%" /out:"%LTL_ROOT%\ltl.lib" "%LTL_ROOT%\src\concurrency.obj" "%LTL_ROOT%\src\emutls.obj" "%LTL_ROOT%\src\filesystem.obj" "%LTL_ROOT%\src\crt_mem.obj" "%LTL_ROOT%\src\stdio_printf.obj" "%LTL_ROOT%\src\stdio_puts.obj" "%LTL_ROOT%\src\iostream.obj" "%LTL_ROOT%\src\locale.obj" "%LTL_ROOT%\src\regex.obj" "%LTL_ROOT%\src\async.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
 del "%LTL_ROOT%\src\*.obj" >nul 2>&1
