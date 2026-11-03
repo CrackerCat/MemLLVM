@@ -225,16 +225,23 @@ In your project properties:
    $(MEMLLVM_DIR)\include;$(MEMLLVM_DIR)\ltl\include;%(AdditionalIncludeDirectories)
    ```
 3. **C/C++** -> **Code Generation**:
+   - Runtime Library: **Multi-threaded (/MT)**
    - Enable C++ Exceptions: **No (`/EHs-c- /GR-`)**
    - Security Check: **Disable Security Check (`/GS-`)**
 4. **C/C++** -> **Command Line** -> **Additional Options**:
    ```text
    /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll" /clang:-fno-jump-tables /clang:-fno-builtin
    ```
-5. **Linker** -> **Input**:
+5. **Linker** -> **General** -> **Additional Library Directories**:
+   ```text
+   $(MEMLLVM_DIR)\lib;$(MEMLLVM_DIR)\ltl;%(AdditionalLibraryDirectories)
+   ```
+6. **Linker** -> **Input**:
    - Ignore All Default Libraries: **Yes (`/NODEFAULTLIB`)**
    - Additional Dependencies: `ltl.lib;kernel32.lib;user32.lib;gdi32.lib;d3d11.lib;`
-6. **Build Events** -> **Post-Build Event**:
+7. **Linker** -> **Advanced**:
+   - Entry Point: **`main`**
+8. **Build Events** -> **Post-Build Event**:
    ```bat
    python "$(MEMLLVM_DIR)\Tools\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
    ```

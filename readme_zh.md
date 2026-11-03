@@ -215,16 +215,23 @@ examples/
    $(MEMLLVM_DIR)\include;$(MEMLLVM_DIR)\ltl\include;%(AdditionalIncludeDirectories)
    ```
 3. **C/C++** -> **代码生成**：
+   - 运行库：**多线程 (/MT)**
    - 启用 C++ 异常：**否 (`/EHs-c- /GR-`)**
    - 安全检查：**禁用安全检查 (`/GS-`)**
 4. **C/C++** -> **命令行** -> **其他选项**：
    ```text
    /clang:-fpass-plugin="$(MEMLLVM_DIR)\bin\MemLLVM.dll" /clang:-fno-jump-tables /clang:-fno-builtin
    ```
-5. **链接器** -> **输入**：
+5. **链接器** -> **常规** -> **附加库目录**：
+   ```text
+   $(MEMLLVM_DIR)\lib;$(MEMLLVM_DIR)\ltl;%(AdditionalLibraryDirectories)
+   ```
+6. **链接器** -> **输入**：
    - 忽略所有默认库：**是 (`/NODEFAULTLIB`)**
    - 附加依赖项：`ltl.lib;kernel32.lib;user32.lib;gdi32.lib;d3d11.lib;`
-6. **生成事件** -> **生成后事件**：
+7. **链接器** -> **高级**：
+   - 入口点：**`main`**
+8. **生成事件** -> **生成后事件**：
    ```bat
    python "$(MEMLLVM_DIR)\Tools\extract_flat_bin.py" "$(TargetPath)" "$(TargetDir)$(TargetName).bin"
    ```

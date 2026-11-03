@@ -43,13 +43,15 @@ jobs:
           # same 22.1.8 commit from the official NSIS installer crashes,
           # the pinned dev build works. So ship the exact clang-cl.exe plus
           # builtin headers the plugin was built against, committed at
-          # release_artifacts/clang-plugin-toolchain.zip (~38 MB, layout:
-          # bin/clang-cl.exe + lib/clang/22/include).
+          # release_artifacts/clang-plugin-toolchain.zip (layout:
+          # bin/clang-cl.exe, bin/lld-link.exe + lib/clang/22/include).
           $dest = "C:\LLVM-22-plugin"
           if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
           Expand-Archive -Path "release_artifacts/clang-plugin-toolchain.zip" -DestinationPath $dest -Force
           $cc = Join-Path $dest "bin\clang-cl.exe"
+          $lld = Join-Path $dest "bin\lld-link.exe"
           if (-not (Test-Path $cc)) { throw "clang-cl.exe missing after unpack" }
+          if (-not (Test-Path $lld)) { throw "lld-link.exe missing after unpack" }
           if (-not (Test-Path (Join-Path $dest "lib\clang\22\include\stdint.h"))) { throw "builtin headers missing after unpack" }
           $v = & $cc --version | Select-Object -First 1
           Write-Host "[+] Toolchain: $v"
