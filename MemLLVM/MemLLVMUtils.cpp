@@ -89,7 +89,6 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "qsort" || Name == "bsearch" ||
       Name == "atexit" || Name == "__cxa_atexit" || Name == "exit" || Name == "_exit" ||
       Name == "_doexit" || Name == "_initterm" || Name == "_initterm_e" ||
-      Name == "__memllvm_get_ansi_argv" || Name == "__memllvm_get_wide_argv" ||
       Name == "__memllvm_dispatch_tu_inits" ||
       Name == "GetActiveProcessorCount" ||
       // Complete Stdio and FILE* family (prefix rules ensure zero omissions)
@@ -177,64 +176,28 @@ void registerTuInit(Module &M, Function *InitFn) {
 }
 
 Function *findOrSynthesizeEntryPoint(Module &M) {
-  // 1. Check for standard main
+  // 1. Check for standard main (parameterless or with argc/argv)
   Function *EntryFn = M.getFunction("main");
   if (EntryFn && !EntryFn->isDeclaration() && !EntryFn->empty()) {
-    if (EntryFn->arg_size() == 0) {
-      if (EntryFn != &*M.begin()) {
-        M.getFunctionList().splice(M.begin(), M.getFunctionList(), EntryFn->getIterator());
-        errs() << "[MemLLVM] Auto-promoted parameterless entry function @main to binary offset 0x00!\n";
-      }
-      return EntryFn;
+    if (EntryFn != &*M.begin()) {
+      M.getFunctionList().splice(M.begin(), M.getFunctionList(), EntryFn->getIterator());
+      errs() << "[MemLLVM] Auto-promoted entry function @main to binary offset 0x00!\n";
     }
-
-    // User's main has parameters: int main(int argc, char **argv)
-    // Synthesize an ABI-compliant entry wrapper with argc >= 1 and valid argv[0]
-    LLVMContext &Ctx = M.getContext();
-    Type *Int32Ty = Type::getInt32Ty(Ctx);
-    Type *PtrTy = PointerType::get(Ctx, 0);
-
-    // Rename original main to avoid symbol collision
-    EntryFn->setName("__memllvm_real_main");
-    EntryFn->setLinkage(GlobalValue::InternalLinkage);
-
-    FunctionType *MainTy = FunctionType::get(Int32Ty, false);
-    Function *MainFn = Function::Create(MainTy, GlobalValue::ExternalLinkage, "main", M);
-    BasicBlock *BB = BasicBlock::Create(Ctx, "entry", MainFn);
-    IRBuilder<> B(BB);
-
-    FunctionCallee GetArgvFn = M.getOrInsertFunction(
-        "__memllvm_get_ansi_argv",
-        FunctionType::get(Type::getVoidTy(Ctx), {PtrTy, PtrTy}, false));
-
-    AllocaInst *ArgcSlot = B.CreateAlloca(Int32Ty, nullptr, "argc");
-    AllocaInst *ArgvSlot = B.CreateAlloca(PtrTy, nullptr, "argv");
-    B.CreateStore(ConstantInt::get(Int32Ty, 1), ArgcSlot);
-    B.CreateStore(ConstantPointerNull::get(cast<PointerType>(PtrTy)), ArgvSlot);
-
-    B.CreateCall(GetArgvFn, {ArgcSlot, ArgvSlot});
-
-    Value *Argc = B.CreateLoad(Int32Ty, ArgcSlot);
-    Value *Argv = B.CreateLoad(PtrTy, ArgvSlot);
-
-    SmallVector<Value *, 2> Args;
-    if (EntryFn->arg_size() >= 1) Args.push_back(Argc);
-    if (EntryFn->arg_size() >= 2) Args.push_back(Argv);
-
-    Value *RetVal = B.CreateCall(EntryFn, Args);
-    if (RetVal->getType()->isIntegerTy()) {
-      B.CreateRet(RetVal);
-    } else {
-      B.CreateRet(ConstantInt::get(Int32Ty, 0));
-    }
-
-    errs() << "[MemLLVM] Synthesized canonical @main wrapper forwarding to @__memllvm_real_main with reconstructed argc/argv\n";
-    M.getFunctionList().splice(M.begin(), M.getFunctionList(), MainFn->getIterator());
-    errs() << "[MemLLVM] Auto-promoted entry function @main to binary offset 0x00!\n";
-    return MainFn;
+    return EntryFn;
   }
 
-  // 2. Check for WinMain / wWinMain
+  // 2. Check for wmain: directly promote as @main (no synthetic argv wrappers)
+  Function *WMainFn = M.getFunction("wmain");
+  if (WMainFn && !WMainFn->isDeclaration() && !WMainFn->empty()) {
+    WMainFn->setName("main");
+    if (WMainFn != &*M.begin()) {
+      M.getFunctionList().splice(M.begin(), M.getFunctionList(), WMainFn->getIterator());
+      errs() << "[MemLLVM] Auto-promoted @wmain (as @main) to binary offset 0x00!\n";
+    }
+    return WMainFn;
+  }
+
+  // 3. Check for WinMain / wWinMain
   //    Signature: (HINSTANCE, HINSTANCE, LPSTR/LPWSTR, int)
   //    NOTE: wmain is deliberately NOT included here. Its signature is
   //    (int argc, wchar_t **argv); feeding it an HINSTANCE as argc and NULL as
@@ -301,60 +264,7 @@ Function *findOrSynthesizeEntryPoint(Module &M) {
     return MainFn;
   }
 
-  // 2b. Check for wmain (CRT signature: int argc, wchar_t **argv)
-  Function *WMainFn = M.getFunction("wmain");
-  if (WMainFn && !WMainFn->isDeclaration() && !WMainFn->empty()) {
-    LLVMContext &Ctx = M.getContext();
-    Type *Int32Ty = Type::getInt32Ty(Ctx);
-    Type *PtrTy = PointerType::get(Ctx, 0);
-
-    FunctionType *MainTy = FunctionType::get(Int32Ty, false);
-    Function *MainFn = Function::Create(MainTy, GlobalValue::ExternalLinkage, "main", M);
-    BasicBlock *BB = BasicBlock::Create(Ctx, "entry", MainFn);
-    IRBuilder<> B(BB);
-
-    FunctionCallee GetArgvFn = M.getOrInsertFunction(
-        "__memllvm_get_wide_argv",
-        FunctionType::get(Type::getVoidTy(Ctx), {PtrTy, PtrTy}, false));
-
-    AllocaInst *ArgcSlot = B.CreateAlloca(Int32Ty, nullptr, "argc");
-    AllocaInst *ArgvSlot = B.CreateAlloca(PtrTy, nullptr, "argv");
-    B.CreateStore(ConstantInt::get(Int32Ty, 1), ArgcSlot);
-    B.CreateStore(ConstantPointerNull::get(cast<PointerType>(PtrTy)), ArgvSlot);
-
-    B.CreateCall(GetArgvFn, {ArgcSlot, ArgvSlot});
-
-    Value *Argc = B.CreateLoad(Int32Ty, ArgcSlot);
-    Value *Argv = B.CreateLoad(PtrTy, ArgvSlot);
-
-    // Legacy wide format specifier options for printf
-    Type *Int64Ty = Type::getInt64Ty(Ctx);
-    FunctionCallee OptFn = M.getOrInsertFunction("__local_stdio_printf_options",
-                                                 FunctionType::get(PtrTy, false));
-    Value *OptPtr = B.CreateCall(OptFn);
-    Value *OptVal = B.CreateLoad(Int64Ty, OptPtr);
-    B.CreateStore(B.CreateOr(OptVal, ConstantInt::get(Int64Ty, 0x4)), OptPtr);
-
-    SmallVector<Value *, 2> Args;
-    if (WMainFn->arg_size() >= 1)
-      Args.push_back(Argc);
-    if (WMainFn->arg_size() >= 2)
-      Args.push_back(Argv);
-
-    Value *RetVal = B.CreateCall(WMainFn, Args);
-    if (RetVal->getType()->isIntegerTy()) {
-      B.CreateRet(RetVal);
-    } else {
-      B.CreateRet(ConstantInt::get(Int32Ty, 0));
-    }
-
-    errs() << "[MemLLVM] Synthesized @main wrapper forwarding to CRT entry @"
-           << WMainFn->getName() << " with reconstructed argc (>=1), argv\n";
-    M.getFunctionList().splice(M.begin(), M.getFunctionList(), MainFn->getIterator());
-    return MainFn;
-  }
-
-  // 3. Library module: no main/WinMain/wmain found
+  // 4. Library module: no main/WinMain/wmain found
   return nullptr;
 }
 

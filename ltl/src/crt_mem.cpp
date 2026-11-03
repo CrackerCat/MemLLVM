@@ -564,16 +564,10 @@ extern "C" void* const __imp_GetActiveProcessorCount = (void*)GetActiveProcessor
 // Lifecycle & Process Management (atexit, exit, _initterm, argv reconstruction)
 // ============================================================================
 
-void* __stdcall GetCommandLineW();
 void* __stdcall GetProcessHeap();
-wchar_t** __stdcall CommandLineToArgvW(const wchar_t* lpCmdLine, int* pNumArgs);
 void* __stdcall HeapAlloc(void* hHeap, unsigned int dwFlags, size_t dwBytes);
 void* __stdcall HeapReAlloc(void* hHeap, unsigned int dwFlags, void* lpMem, size_t dwBytes);
 int __stdcall HeapFree(void* hHeap, unsigned int dwFlags, void* lpMem);
-int __stdcall WideCharToMultiByte(unsigned int CodePage, unsigned int dwFlags,
-                                  const wchar_t* lpWideCharStr, int cchWideChar,
-                                  char* lpMultiByteStr, int cbMultiByte,
-                                  const char* lpDefaultChar, int* lpUsedDefaultChar);
 
 typedef void (__cdecl *atexit_func_t)();
 typedef void (__cdecl *cxa_dtor_t)(void *);
@@ -664,71 +658,6 @@ int _initterm_e(_PVFV *pfbegin, _PVFV *pfend) {
         ++pfbegin;
     }
     return 0;
-}
-
-void __memllvm_get_ansi_argv(int *out_argc, char ***out_argv) {
-    int numArgs = 0;
-    const wchar_t *cmdLine = static_cast<const wchar_t *>(GetCommandLineW());
-    wchar_t **argvW = cmdLine ? CommandLineToArgvW(cmdLine, &numArgs) : nullptr;
-    if (!argvW || numArgs <= 1) {
-        static char fallback_bin[] = "app.bin";
-        static char *fallback_argv[] = { fallback_bin, nullptr };
-        if (out_argc) *out_argc = 1;
-        if (out_argv) *out_argv = fallback_argv;
-        return;
-    }
-
-    // argv[0] is the program name -- C semantics count it in argc. Dropping it
-    // here shifts every user argument one slot to the left, so a program invoked
-    // as "app.exe version" would see argc == 1 and argv[0] == "version", i.e. it
-    // would treat its first real argument as the executable path and run nothing.
-    int eff_argc = numArgs;
-    void *heap = GetProcessHeap();
-    char **argvA = static_cast<char **>(HeapAlloc(heap, 8 /* HEAP_ZERO_MEMORY */, (eff_argc + 1) * sizeof(char *)));
-    if (!argvA) {
-        static char fallback_bin[] = "app.bin";
-        static char *fallback_argv[] = { fallback_bin, nullptr };
-        if (out_argc) *out_argc = 1;
-        if (out_argv) *out_argv = fallback_argv;
-        return;
-    }
-
-    for (int i = 0; i < eff_argc; ++i) {
-        const wchar_t *wstr = argvW[i];
-        int len = WideCharToMultiByte(0 /* CP_ACP */, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
-        if (len > 0) {
-            char *buf = static_cast<char *>(HeapAlloc(heap, 0, len));
-            if (buf) {
-                WideCharToMultiByte(0, 0, wstr, -1, buf, len, nullptr, nullptr);
-                argvA[i] = buf;
-            } else {
-                argvA[i] = const_cast<char *>("");
-            }
-        } else {
-            argvA[i] = const_cast<char *>("");
-        }
-    }
-    argvA[eff_argc] = nullptr;
-    if (out_argc) *out_argc = eff_argc;
-    if (out_argv) *out_argv = argvA;
-}
-
-void __memllvm_get_wide_argv(int *out_argc, wchar_t ***out_argv) {
-    int numArgs = 0;
-    const wchar_t *cmdLine = static_cast<const wchar_t *>(GetCommandLineW());
-    wchar_t **argvW = cmdLine ? CommandLineToArgvW(cmdLine, &numArgs) : nullptr;
-    if (!argvW || numArgs <= 1) {
-        static wchar_t fallback_bin[] = L"app.bin";
-        static wchar_t *fallback_argv[] = { fallback_bin, nullptr };
-        if (out_argc) *out_argc = 1;
-        if (out_argv) *out_argv = fallback_argv;
-        return;
-    }
-    // Same as the ANSI variant: keep argv[0] (the program name) in argv so that
-    // argc/argv follow the standard CRT contract. CommandLineToArgvW already
-    // returns exactly that layout, so hand it back untouched.
-    if (out_argc) *out_argc = numArgs;
-    if (out_argv) *out_argv = argvW;
 }
 
 } // extern "C"
