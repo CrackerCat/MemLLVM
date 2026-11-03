@@ -85,9 +85,13 @@ DEFINES = [
     "-D_CRT_NONSTDC_NO_DEPRECATE",
     "/GS-",
     "/GR-",
+    "/Gy",
+    "/clang:-ffunction-sections",
+    "/clang:-fdata-sections",
     "/clang:-fno-exceptions",
     "/clang:-fno-builtin",
-    "-O2",
+    "/O1",
+    "/clang:-Oz",
     "/W0",
     f"/clang:-fpass-plugin={PLUGIN_DLL}"
 ]
@@ -160,7 +164,11 @@ def extract_flat_bin_with_selfrebase(exe_path, out_bin_path):
     print(f"[*] Processing PE: {exe_path}")
     pe = pefile.PE(exe_path)
     
-    base_rva = 0x1000
+    LOADABLE_SECTIONS = ('.text', '.rdata', '.data', '.bss')
+    loadable = [s for s in pe.sections if s.Name.decode().rstrip('\0') in LOADABLE_SECTIONS]
+    if not loadable:
+        raise ValueError("No loadable sections found in PE!")
+    base_rva = min(s.VirtualAddress for s in loadable)
     image_base = pe.OPTIONAL_HEADER.ImageBase
     orig_base = image_base + base_rva
     entry_point_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
@@ -173,7 +181,6 @@ def extract_flat_bin_with_selfrebase(exe_path, out_bin_path):
     with open(exe_path, 'rb') as f:
         exe_data = f.read()
 
-    LOADABLE_SECTIONS = ('.text', '.rdata', '.data', '.bss')
     max_rva = 0
     for s in pe.sections:
         name = s.Name.decode().rstrip('\0')
@@ -275,6 +282,10 @@ def main():
         "/entry:main",
         "/nodefaultlib",
         "/safeseh:no",
+        "/opt:ref",
+        "/opt:icf",
+        "/align:512",
+        "/merge:.rdata=.text",
         f"/out:{temp_exe}",
         LTL_LIB
     ] + obj_files

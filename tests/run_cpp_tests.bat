@@ -47,8 +47,8 @@ if "%PLUGIN_DLL%"=="" (
 set LTL_LIB=D:\MemLLVM\ltl\ltl.lib
 set LTL_INC=D:\MemLLVM\ltl\include
 
-set COMMON_FLAGS=/std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /clang:-ffreestanding /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" -O2
-set LINK_FLAGS=/entry:main /subsystem:console /nodefaultlib /safeseh:no /opt:noicf
+set COMMON_FLAGS=/std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /Gy /clang:-ffunction-sections /clang:-fdata-sections /clang:-ffreestanding /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" /O1 /clang:-Oz
+set LINK_FLAGS=/entry:main /subsystem:console /nodefaultlib /safeseh:no /opt:ref /opt:icf /align:512 /merge:.rdata=.text
 
 echo [*] Compiling and running Test 1: STL vector container...
 "%CLANG_BIN%" %COMMON_FLAGS% -c D:\MemLLVM\tests\test_cpp_stl_basic.cpp /Fo:D:\MemLLVM\tests\test_cpp_stl_basic.obj
@@ -218,7 +218,7 @@ echo [Test 15 Status: %ERRORLEVEL%]
 
 echo.
 echo [*] Compiling and running Test 16: C++20 Standard Module (import std;)...
-set MODULE_FLAGS=/std:c++20 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" "/clang:-fmodule-file=std=D:\MemLLVM\ltl\modules\std.pcm" -O2
+set MODULE_FLAGS=/std:c++20 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /Gy /clang:-ffunction-sections /clang:-fdata-sections /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" "/clang:-fmodule-file=std=D:\MemLLVM\ltl\modules\std.pcm" /O1 /clang:-Oz
 "%CLANG_BIN%" %MODULE_FLAGS% -c D:\MemLLVM\tests\test_cpp_module_std.cpp /Fo:D:\MemLLVM\tests\test_cpp_module_std.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_module_std.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_module_std.exe

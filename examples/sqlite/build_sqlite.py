@@ -77,9 +77,10 @@ def main():
         "/GS-", "/clang:-ffreestanding", "/clang:-fno-builtin",
         "/clang:-fno-jump-tables", "/clang:-fno-exceptions", "/clang:-fno-rtti",
         "/D_HAS_EXCEPTIONS=0",
+        "/Gy", "/clang:-ffunction-sections", "/clang:-fdata-sections",
         f"-I{LTL_INC}",
         f"-I{SCRIPT_DIR}",
-        "-O2",
+        "/O1", "/clang:-Oz",
         "/DUSE_SYSTEM_SQLITE=1",
         SHELL_C,
         f"/Fo{SHELL_OBJ}"
@@ -95,6 +96,9 @@ def main():
     link_cmd = [
         LLD_LINK, "/nologo", "/nodefaultlib",
         "/entry:main", "/subsystem:console",
+        "/opt:ref", "/opt:icf",
+        "/align:512",
+        "/merge:.rdata=.text",
         f"/out:{SQLITE_EXE}",
         SHELL_OBJ,
         LTL_LIB

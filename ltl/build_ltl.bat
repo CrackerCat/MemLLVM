@@ -52,31 +52,33 @@ if "%PLUGIN_DLL%"=="" (
 
 echo [*] Compiling MemLLVM-LTL components...
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\concurrency.cpp" /Fo"%LTL_ROOT%\src\concurrency.obj"
+set COMP_FLAGS=/c /O1 /clang:-Oz /Gy /clang:-ffunction-sections /clang:-fdata-sections /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%"
+
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\concurrency.cpp" /Fo"%LTL_ROOT%\src\concurrency.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\emutls.cpp" /Fo"%LTL_ROOT%\src\emutls.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\emutls.cpp" /Fo"%LTL_ROOT%\src\emutls.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\filesystem.cpp" /Fo"%LTL_ROOT%\src\filesystem.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\filesystem.cpp" /Fo"%LTL_ROOT%\src\filesystem.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\crt_mem.cpp" /Fo"%LTL_ROOT%\src\crt_mem.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\crt_mem.cpp" /Fo"%LTL_ROOT%\src\crt_mem.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\crt_stdio.cpp" /Fo"%LTL_ROOT%\src\crt_stdio.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\crt_stdio.cpp" /Fo"%LTL_ROOT%\src\crt_stdio.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\iostream.cpp" /Fo"%LTL_ROOT%\src\iostream.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\iostream.cpp" /Fo"%LTL_ROOT%\src\iostream.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\locale.cpp" /Fo"%LTL_ROOT%\src\locale.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\locale.cpp" /Fo"%LTL_ROOT%\src\locale.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\regex.cpp" /Fo"%LTL_ROOT%\src\regex.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\regex.cpp" /Fo"%LTL_ROOT%\src\regex.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-"%CLANG_BIN%" /c /O2 /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%" "%LTL_ROOT%\src\async.cpp" /Fo"%LTL_ROOT%\src\async.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\async.cpp" /Fo"%LTL_ROOT%\src\async.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
 echo [*] Archiving into ltl.lib...

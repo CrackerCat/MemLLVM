@@ -51,11 +51,11 @@ set LTL_LIB=..\..\ltl\ltl.lib
 set LTL_INC=..\..\ltl\include
 
 echo [*] Compiling Dear ImGui Unity codebase with MemLLVM Plugin...
-"%CLANG_BIN%" /std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" -I. -Ibackends -Iexamples\example_win32_directx11 -O2 -c imgui_unity.cpp /Fo:imgui_unity.obj
+"%CLANG_BIN%" /std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /Gy /clang:-ffunction-sections /clang:-fdata-sections /clang:-ffreestanding /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" -I. -Ibackends -Iexamples\example_win32_directx11 /O1 /clang:-Oz -c imgui_unity.cpp /Fo:imgui_unity.obj
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 
 echo [*] Linking Dear ImGui with lld-link and ltl.lib...
-"%LLD_BIN%" /entry:main /subsystem:console /nodefaultlib /safeseh:no imgui_unity.obj "%LTL_LIB%" -out:imgui_unity.exe
+"%LLD_BIN%" /entry:main /subsystem:console /nodefaultlib /safeseh:no /opt:ref /opt:icf /align:512 /merge:.rdata=.text imgui_unity.obj "%LTL_LIB%" -out:imgui_unity.exe
 if %ERRORLEVEL% neq 0 ( echo [-] Linking failed! & exit /b 1 )
 
 echo [*] Extracting flat contiguous virtual machine code image...

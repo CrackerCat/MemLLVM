@@ -2,6 +2,10 @@
 # MemLLVM - Git Ignore Rules
 # ==========================================
 
+# Python cache
+__pycache__/
+*.pyc
+
 # Build output directories
 build/
 bin/
