@@ -33,30 +33,6 @@ void __memllvm_dispatch_tu_inits(void) {
 
 __declspec(selectany) int _fltused = 0x9875;
 
-int __CxxFrameHandler3() {
-    return 0;
-}
-
-// SEH personality routine for functions containing __try/__except.
-//
-// clang-cl lowers `__try` to a `personality ptr @__C_specific_handler` operand
-// on the enclosing function, so this symbol is referenced by the object file
-// even though nothing ever *calls* it from generated code. A flat binary has no
-// registered .pdata/UNWIND_INFO, so the OS will never dispatch through it
-// either; this definition exists so the link succeeds.
-//
-// Return value is an EXCEPTION_DISPOSITION. 1 == ExceptionContinueSearch is the
-// safe "I do not handle this" answer, which also means: a hardware fault inside
-// a __try block in a MemLLVM image is NOT caught by the __except clause.
-int __C_specific_handler(void* ExceptionRecord, void* EstablisherFrame,
-                         void* ContextRecord, void* DispatcherContext) {
-    (void)ExceptionRecord;
-    (void)EstablisherFrame;
-    (void)ContextRecord;
-    (void)DispatcherContext;
-    return 1; // ExceptionContinueSearch
-}
-
 [[noreturn]] void __cdecl __std_terminate() noexcept {
     ExitProcess(0xc0000025);
     __builtin_unreachable();

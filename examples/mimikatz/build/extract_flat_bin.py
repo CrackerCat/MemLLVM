@@ -36,12 +36,6 @@ Two things used to be wrong here and both are fixed:
 import struct
 import sys
 
-# Print Chinese diagnostics safely on CI runners (cp1252 console would
-# raise UnicodeEncodeError). Force UTF-8 on both streams.
-for _stream in (sys.stdout, sys.stderr):
-    if hasattr(_stream, 'reconfigure'):
-        _stream.reconfigure(encoding='utf-8', errors='replace')
-
 # IMAGE_REL_BASED_DIR64
 DIR64 = 10
 
@@ -51,11 +45,10 @@ DIR64 = 10
 # Sections that carry no loadable content: the relocation directory is consumed
 # to build the flat reloc table, and the symbol/import tables do not exist in a
 # /nodefaultlib flat link anyway.
-SKIP_SECTIONS = ('.reloc', '.edata', '.idata', '.rsrc', '.pdata', '.xdata', '.tls')
+SKIP_SECTIONS = ('.reloc', '.edata', '.idata', '.rsrc', '.tls')
 SECTION_DIAGNOSTICS = {
     '.tls': '[!] Notice: .tls section skipped. Native Thread Local Storage (__declspec(thread)) requires OS TEB initialization not present in flat memory binaries. Use MemLLVM thread-safe local statics or atomics.',
-    '.rsrc': '[!] Notice: .rsrc section skipped. Windows PE resource directories (icons, manifest) are not embedded in flat shellcode; embed assets as static byte arrays or load dynamically.',
-    '.pdata': '[!] Notice: .pdata section skipped. X64 SEH function table requires OS loader registration via RtlAddFunctionTable; C++ exceptions are disabled (-fno-exceptions).'
+    '.rsrc': '[!] Notice: .rsrc section skipped. Windows PE resource directories (icons, manifest) are not embedded in flat shellcode; embed assets as static byte arrays or load dynamically.'
 }
 
 
@@ -105,13 +98,14 @@ def parse_pe(data):
         hdr = sec_off + i * 40
         name = data[hdr:hdr + 8].rstrip(b'\0').decode('latin1', errors='ignore')
         virt_size, virt_addr, raw_size, raw_ptr = struct.unpack_from('<IIII', data, hdr + 8)
+        actual_span = virt_size if virt_size > 0 else raw_size
         sections.append({
             'name': name,
             'virt_size': virt_size,
             'virt_addr': virt_addr,
             'raw_size': raw_size,
             'raw_ptr': raw_ptr,
-            'span': max(virt_size, raw_size),
+            'span': actual_span,
         })
 
     # DataDirectory[5] == IMAGE_DIRECTORY_ENTRY_BASERELOC
@@ -174,7 +168,8 @@ def collect_dir64_relocs(data, pe, base_rva, total_size):
 
 
 def build_stub(stub_offset, orig_base, entry_offset, num_relocs,
-               reloc_table_offset, orig5):
+               reloc_table_offset, orig5, pdata_info_offset=None,
+               pdata_offset=0, pdata_count=0, base_rva=0):
     """Emit the x64 self-rebase stub. Identical encoding to build_chip8.py."""
     code = bytearray()
 
@@ -213,6 +208,24 @@ def build_stub(stub_offset, orig_base, entry_offset, num_relocs,
 
     skip_target = len(code)
     code[jz_idx + 1] = skip_target - (jz_idx + 2)
+
+    # 4.5. If SEH exception table is present and descriptor exists, populate it:
+    # rdx has the dynamic base address of the flat image (`mem`).
+    if pdata_info_offset is not None and pdata_count > 0:
+        # rax = rdx - base_rva (real ImageBase registered with OS)
+        code.extend(b'\x48\x89\xD0')                  # mov rax, rdx
+        if base_rva != 0:
+            code.extend(b'\x48\x2D' + struct.pack('<I', base_rva)) # sub rax, base_rva
+        # mov [rdx + pdata_info_offset + 8], rax (image_base)
+        code.extend(b'\x48\x89\x82' + struct.pack('<I', pdata_info_offset + 8))
+
+        # rax = rdx + pdata_offset (pointer to RUNTIME_FUNCTION array)
+        code.extend(b'\x48\x8D\x82' + struct.pack('<I', pdata_offset)) # lea rax, [rdx + pdata_offset]
+        # mov [rdx + pdata_info_offset + 16], rax (pdata_ptr)
+        code.extend(b'\x48\x89\x82' + struct.pack('<I', pdata_info_offset + 16))
+
+        # mov dword ptr [rdx + pdata_info_offset + 24], pdata_count
+        code.extend(b'\xC7\x82' + struct.pack('<I', pdata_info_offset + 24) + struct.pack('<I', pdata_count))
 
     # 5. Restore the 5 bytes we clobbered with the entry jmp.
     orig_dw, orig_b = struct.unpack('<IB', orig5)
@@ -267,11 +280,12 @@ def make_flat_bin(exe_path, out_bin_path):
 
     for sec in packed:
         off = sec['virt_addr'] - base_rva
-        raw = data[sec['raw_ptr']:sec['raw_ptr'] + sec['raw_size']]
+        copy_len = min(sec['raw_size'], sec['span'])
+        raw = data[sec['raw_ptr']:sec['raw_ptr'] + copy_len]
         if raw:
             flat_buf[off:off + len(raw)] = raw
-        if sec['span'] > sec['raw_size']:
-            flat_buf[off + sec['raw_size']:off + sec['span']] = b'\0' * (sec['span'] - sec['raw_size'])
+        if sec['span'] > copy_len:
+            flat_buf[off + copy_len:off + sec['span']] = b'\0' * (sec['span'] - copy_len)
         print('  Section %-8s RVA=0x%-6X span=0x%-6X raw=0x%-6X -> off 0x%X'
               % (sec['name'], sec['virt_addr'], sec['span'], sec['raw_size'], off))
 
@@ -279,6 +293,24 @@ def make_flat_bin(exe_path, out_bin_path):
 
     relocs = collect_dir64_relocs(data, pe, base_rva, total_size)
     print('[+] DIR64 relocations: %d' % len(relocs))
+
+    pdata_sec = next((s for s in packed if s['name'] == '.pdata'), None)
+    pdata_offset = 0
+    pdata_count = 0
+    if pdata_sec:
+        pdata_offset = pdata_sec['virt_addr'] - base_rva
+        pdata_count = pdata_sec['span'] // 12
+        print('  [+] Exception Handling: Preserved .pdata (%d entries at offset 0x%X)'
+              % (pdata_count, pdata_offset))
+
+    pdata_info_offset = None
+    magic_bytes = struct.pack('<Q', 0x4D454D4C4C564D45)
+    magic_idx = flat_buf.find(magic_bytes)
+    if magic_idx != -1:
+        pdata_info_offset = magic_idx
+        if pdata_count > 0:
+            print('  [+] Exception Handling: Bound MemLLVM_PDataInfo descriptor at offset 0x%X'
+                  % pdata_info_offset)
 
     # Displace the first 5 bytes with a jmp into the stub; the stub puts them back.
     if total_size < 5:
@@ -290,10 +322,12 @@ def make_flat_bin(exe_path, out_bin_path):
 
     # Two-pass: the stub length depends on reloc_table_offset, which depends on
     # the stub length. The length is invariant to the value, so measure first.
-    dummy = build_stub(stub_offset, orig_base, entry_offset, len(relocs), 0, orig5)
+    dummy = build_stub(stub_offset, orig_base, entry_offset, len(relocs), 0, orig5,
+                       pdata_info_offset, pdata_offset, pdata_count, base_rva)
     reloc_table_offset = stub_offset + len(dummy)
     stub = build_stub(stub_offset, orig_base, entry_offset, len(relocs),
-                      reloc_table_offset, orig5)
+                      reloc_table_offset, orig5,
+                      pdata_info_offset, pdata_offset, pdata_count, base_rva)
     assert len(stub) == len(dummy)
 
     reloc_bytes = struct.pack('<%dI' % len(relocs), *relocs) if relocs else b''

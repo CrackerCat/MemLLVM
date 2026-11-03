@@ -66,6 +66,8 @@ int __cxa_atexit(void (__cdecl *func)(void *), void *arg, void *dso_handle) {
     return 0;
 }
 
+extern "C" void MemLLVM_CleanupExceptions(void);
+
 void _doexit() {
     while (s_memllvm_atexit_count > 0) {
         --s_memllvm_atexit_count;
@@ -84,6 +86,7 @@ void _doexit() {
         s_memllvm_atexit_table = nullptr;
         s_memllvm_atexit_capacity = 0;
     }
+    MemLLVM_CleanupExceptions();
 }
 
 void exit(int status) {

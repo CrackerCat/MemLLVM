@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 echo =======================================================================
-echo   MemLLVM Full Modern C++ Regression Test Suite (19 Tests)
+echo   MemLLVM Full Modern C++ Regression Test Suite (20 Tests)
 echo =======================================================================
 
 if not "%LLVM_PATH%"=="" set "LLVM_ROOT=%LLVM_PATH%"
@@ -275,9 +275,22 @@ if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 19 Status: %ERRORLEVEL%]
 
+echo.
+echo [*] Compiling and running Test 20: Full C++ Exception Handling and RAII Unwinding...
+set EH_FLAGS=/std:c++17 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /Gy /clang:-ffunction-sections /clang:-fdata-sections /clang:-ffreestanding /clang:-fno-builtin /clang:-fno-jump-tables /EHsc -I"%LTL_INC%" /O1 /clang:-Oz /D_NO_CRT_STDIO_INLINE
+"%CLANG_BIN%" %EH_FLAGS% -c D:\MemLLVM\tests\test_cpp_exceptions.cpp /Fo:D:\MemLLVM\tests\test_cpp_exceptions.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_cpp_exceptions.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_cpp_exceptions.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
+python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_cpp_exceptions.bin D:\MemLLVM\tests\test_cpp_exceptions.exe
+python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_cpp_exceptions.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
+
+echo [Test 20 Status: %ERRORLEVEL%]
+
 
 echo.
 echo =======================================================================
-echo   ALL 19 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
+echo   ALL 20 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
 echo =======================================================================
 endlocal

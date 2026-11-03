@@ -75,7 +75,6 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
     {"?_Xoverflow_error@std@@YAXPEBD@Z",       0xC0000095},
     {"?_Xruntime_error@std@@YAXPEBD@Z",        0xC0000001},
     {"_invalid_parameter_noinfo_noreturn",     0xC000000D},
-    {"_CxxThrowException",                     0xE06D7363},
     {"_purecall",                              0xC0000025},
     {"?_Xregex_error@std@@YAXW4error_type@regex_constants@1@@Z", 0xC0000002},
     {"?_Xbad_function_call@std@@YAXXZ",        0xC0000003}
