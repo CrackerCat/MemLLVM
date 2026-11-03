@@ -6,6 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 
+// Embed linker directives into .drectve to automatically merge .rdata into .text
+#pragma comment(linker, "/merge:.rdata=.text")
+
 extern "C" void __stdcall ExitProcess(unsigned int uExitCode);
 
 extern "C" {

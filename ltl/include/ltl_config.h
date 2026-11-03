@@ -28,3 +28,7 @@
 #ifndef _CRT_DISABLE_PERFCRIT_LOCKS
 #define _CRT_DISABLE_PERFCRIT_LOCKS 1
 #endif
+
+// Automatically merge .rdata into .text to eliminate 4KB PE section padding
+#pragma comment(linker, "/merge:.rdata=.text")
+

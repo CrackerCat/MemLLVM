@@ -26,7 +26,24 @@ PreservedAnalyses GlobalSectionPass::run(Module &M, ModuleAnalysisManager &MAM) 
     }
   }
 
-  // We ensure common symbols have explicit zero initializers so they belong cleanly to .bss/.data
+  // Automatically inject linker directive to merge .rdata into .text
+  // This eliminates 4KB PE section alignment gaps between code and read-only data.
+  NamedMDNode *LinkerOptions = M.getOrInsertNamedMetadata("llvm.linker.options");
+  bool HasMergeRdata = false;
+  for (unsigned i = 0; i < LinkerOptions->getNumOperands(); ++i) {
+    MDNode *MD = LinkerOptions->getOperand(i);
+    for (unsigned j = 0; j < MD->getNumOperands(); ++j) {
+      if (auto *MDS = dyn_cast<MDString>(MD->getOperand(j))) {
+        if (MDS->getString().contains("/merge:.rdata=.text")) HasMergeRdata = true;
+      }
+    }
+  }
+  if (!HasMergeRdata) {
+    Metadata *Args[] = { MDString::get(Ctx, "/merge:.rdata=.text") };
+    LinkerOptions->addOperand(MDNode::get(Ctx, Args));
+    Changed = true;
+  }
+
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
