@@ -26,10 +26,9 @@ uint32_t calculateRor13(StringRef str) {
 namespace {
 
 // Slot section name using `$m` subgroup. LLD and MSVC link.exe sort COFF `$` subgroups
-// alphabetically within a merged section (.mli$a < .mli$m < .mli$z).
-// Sentinels .mli$a (__memllvm_mli_start) and .mli$z (__memllvm_mli_end) in ltl.lib bracket
-// all TU initializer slots in .mli$m across translation units.
-constexpr const char *kInitSection = ".mli$m";
+// Alphabetical merging within .rdata (.rdata$mlia < .rdata$mlim < .rdata$mliz).
+// Sentinels in ltl.lib bracket all TU initializer slots in .rdata$mlim across translation units.
+constexpr const char *kInitSection = ".rdata$mlim";
 constexpr const char *kTuInitName = "__memllvm_tu_init";
 
 } // namespace

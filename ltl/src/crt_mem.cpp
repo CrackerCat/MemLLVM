@@ -12,11 +12,11 @@ extern "C" {
 
 typedef void (*__memllvm_init_fn_t)(void);
 
-#pragma section(".mli$a", read)
-#pragma section(".mli$z", read)
+#pragma section(".rdata$mlia", read)
+#pragma section(".rdata$mliz", read)
 
-__declspec(allocate(".mli$a")) const __memllvm_init_fn_t __memllvm_mli_start = nullptr;
-__declspec(allocate(".mli$z")) const __memllvm_init_fn_t __memllvm_mli_end = nullptr;
+__declspec(allocate(".rdata$mlia")) const __memllvm_init_fn_t __memllvm_mli_start = nullptr;
+__declspec(allocate(".rdata$mliz")) const __memllvm_init_fn_t __memllvm_mli_end = nullptr;
 
 void __memllvm_dispatch_tu_inits(void) {
     const __memllvm_init_fn_t* cur = &__memllvm_mli_start + 1;
@@ -568,6 +568,8 @@ void* __stdcall GetCommandLineW();
 void* __stdcall GetProcessHeap();
 wchar_t** __stdcall CommandLineToArgvW(const wchar_t* lpCmdLine, int* pNumArgs);
 void* __stdcall HeapAlloc(void* hHeap, unsigned int dwFlags, size_t dwBytes);
+void* __stdcall HeapReAlloc(void* hHeap, unsigned int dwFlags, void* lpMem, size_t dwBytes);
+int __stdcall HeapFree(void* hHeap, unsigned int dwFlags, void* lpMem);
 int __stdcall WideCharToMultiByte(unsigned int CodePage, unsigned int dwFlags,
                                   const wchar_t* lpWideCharStr, int cchWideChar,
                                   char* lpMultiByteStr, int cbMultiByte,
@@ -583,13 +585,27 @@ struct MemLLVMAtexitEntry {
     bool is_cxa;
 };
 
-static constexpr size_t MEMLLVM_MAX_ATEXIT = 256;
-static MemLLVMAtexitEntry s_memllvm_atexit_table[MEMLLVM_MAX_ATEXIT];
+static MemLLVMAtexitEntry* s_memllvm_atexit_table = nullptr;
+static size_t s_memllvm_atexit_capacity = 0;
 static size_t s_memllvm_atexit_count = 0;
+
+static bool ensure_atexit_capacity() {
+    if (s_memllvm_atexit_count < s_memllvm_atexit_capacity) return true;
+    size_t new_cap = (s_memllvm_atexit_capacity == 0) ? 32 : s_memllvm_atexit_capacity * 2;
+    void* heap = GetProcessHeap();
+    if (!heap) return false;
+    void* new_buf = s_memllvm_atexit_table
+        ? HeapReAlloc(heap, 0, s_memllvm_atexit_table, new_cap * sizeof(MemLLVMAtexitEntry))
+        : HeapAlloc(heap, 0, new_cap * sizeof(MemLLVMAtexitEntry));
+    if (!new_buf) return false;
+    s_memllvm_atexit_table = static_cast<MemLLVMAtexitEntry*>(new_buf);
+    s_memllvm_atexit_capacity = new_cap;
+    return true;
+}
 
 int atexit(void (__cdecl *func)()) {
     if (!func) return -1;
-    if (s_memllvm_atexit_count >= MEMLLVM_MAX_ATEXIT) return -1;
+    if (!ensure_atexit_capacity()) return -1;
     s_memllvm_atexit_table[s_memllvm_atexit_count++] = { reinterpret_cast<cxa_dtor_t>(func), nullptr, false };
     return 0;
 }
@@ -597,7 +613,7 @@ int atexit(void (__cdecl *func)()) {
 int __cxa_atexit(void (__cdecl *func)(void *), void *arg, void *dso_handle) {
     (void)dso_handle;
     if (!func) return -1;
-    if (s_memllvm_atexit_count >= MEMLLVM_MAX_ATEXIT) return -1;
+    if (!ensure_atexit_capacity()) return -1;
     s_memllvm_atexit_table[s_memllvm_atexit_count++] = { func, arg, true };
     return 0;
 }
@@ -613,6 +629,12 @@ void _doexit() {
                 reinterpret_cast<atexit_func_t>(entry.func)();
             }
         }
+    }
+    if (s_memllvm_atexit_table) {
+        void* heap = GetProcessHeap();
+        if (heap) HeapFree(heap, 0, s_memllvm_atexit_table);
+        s_memllvm_atexit_table = nullptr;
+        s_memllvm_atexit_capacity = 0;
     }
 }
 
