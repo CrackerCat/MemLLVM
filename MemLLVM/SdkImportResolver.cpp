@@ -256,13 +256,18 @@ public:
       ApiDllCache[s] = "";
       return "";
     }
+    static HMODULE hUcrt = LoadLibraryA("ucrtbase.dll");
+    if (hUcrt && GetProcAddress(hUcrt, s.c_str())) {
+      ApiDllCache[s] = "ucrtbase.dll";
+      return "ucrtbase.dll";
+    }
 #endif
 
     auto normalizeDll = [](const std::string &dll) -> std::string {
       if (dll == "kernel32.dll" || dll == "ntdll.dll")
         return "";
       if (dll == "ucrtbased.dll" || dll == "ucrtbase.dll" || dll.rfind("api-ms-win-crt-", 0) == 0)
-        return "msvcrt.dll";
+        return "ucrtbase.dll";
       return dll;
     };
 
@@ -315,6 +320,11 @@ public:
       return true;
     }
     if (hNt && GetProcAddress(hNt, s.c_str())) {
+      ApiCheckCache[s] = true;
+      return true;
+    }
+    static HMODULE hUcrt = LoadLibraryA("ucrtbase.dll");
+    if (hUcrt && GetProcAddress(hUcrt, s.c_str())) {
       ApiCheckCache[s] = true;
       return true;
     }

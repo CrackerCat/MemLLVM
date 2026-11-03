@@ -72,8 +72,6 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "_Getcoll" || Name == "_Getcvt" || Name == "_Getdateorder" ||
       Name == "_Strcoll" || Name == "_Strxfrm" || Name == "_Wcscoll" ||
       Name == "_Mbrtowc" || Name == "_Wcrtomb" ||
-      Name == "_get_stream_buffer_pointers" ||
-      Name == "_lock_file" || Name == "_unlock_file" ||
       Name.contains("__ExceptionPtr") ||
       Name == "memcpy" || Name == "memmove" || Name == "memset" ||
       Name == "strlen" || Name == "wcslen" || Name == "strcpy" || Name == "strncpy" ||
@@ -91,42 +89,6 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "_doexit" || Name == "_initterm" || Name == "_initterm_e" ||
       Name == "__memllvm_dispatch_tu_inits" ||
       Name == "GetActiveProcessorCount" ||
-      // Complete Stdio and FILE* family (prefix rules ensure zero omissions)
-      Name.starts_with("__stdio_common_") ||
-      Name.starts_with("__acrt_") ||
-      Name == "__acrt_iob_func" ||
-      Name.starts_with("fopen") || Name.starts_with("_wfopen") ||
-      Name.starts_with("freopen") || Name.starts_with("_wfreopen") ||
-      Name.starts_with("fclose") || Name == "_fcloseall" ||
-      Name.starts_with("fread") || Name.starts_with("fwrite") ||
-      Name.starts_with("fseek") || Name.starts_with("_fseek") ||
-      Name.starts_with("ftell") || Name.starts_with("_ftell") ||
-      Name.starts_with("fget") || Name.starts_with("_fget") ||
-      Name.starts_with("fput") || Name.starts_with("_fput") ||
-      Name.starts_with("getc") || Name.starts_with("getw") ||
-      Name.starts_with("putc") || Name.starts_with("putw") ||
-      Name.starts_with("_getc") || Name.starts_with("_getw") ||
-      Name.starts_with("_putc") || Name.starts_with("_putw") ||
-      Name.starts_with("unget") || Name.starts_with("_unget") ||
-      Name.starts_with("feof") || Name.starts_with("_feof") ||
-      Name.starts_with("ferror") || Name.starts_with("_ferror") ||
-      Name.starts_with("clearerr") || Name.starts_with("_clearerr") ||
-      Name.starts_with("fflush") || Name.starts_with("_fflush") ||
-      Name == "fgetpos" || Name == "fsetpos" || Name == "rewind" ||
-      Name == "setvbuf" || Name == "setbuf" ||
-      Name == "remove" || Name == "_wremove" ||
-      Name == "rename" || Name == "_wrename" ||
-      Name == "getchar" || Name == "getwchar" ||
-      Name == "putchar" || Name == "putwchar" ||
-      Name == "puts" ||
-      Name == "printf" || Name == "wprintf" ||
-      Name == "vprintf" || Name == "vwprintf" ||
-      Name == "fprintf" || Name == "fwprintf" ||
-      Name == "vfprintf" || Name == "vfwprintf" ||
-      Name == "sprintf" || Name == "snprintf" || Name == "swprintf" ||
-      Name == "vsprintf" || Name == "vsnprintf" || Name == "vswprintf" ||
-      Name == "_fileno" || Name == "_setmode" ||
-      Name == "__iob_func" || Name == "__p__iob" ||
       Name == "__C_specific_handler" ||
       Name == "_fltused") {
     return true;

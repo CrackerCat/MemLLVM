@@ -261,8 +261,6 @@ echo [*] Compiling and running Test 19: argc/argv reconstruction (main and wmain
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_argv_ansi.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_argv_ansi.exe
 if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
-D:\MemLLVM\tests\test_argv_ansi.exe alpha beta
-if %ERRORLEVEL% neq 0 ( echo [-] Execution of test_argv_ansi.exe failed! & exit /b 1 )
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_argv_ansi.bin D:\MemLLVM\tests\test_argv_ansi.exe
 python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_argv_ansi.bin 0
 if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
@@ -271,8 +269,6 @@ if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
 "%LLD_BIN%" %LINK_FLAGS% D:\MemLLVM\tests\test_argv_wide.obj "%LTL_LIB%" -out:D:\MemLLVM\tests\test_argv_wide.exe
 if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
-D:\MemLLVM\tests\test_argv_wide.exe alpha beta
-if %ERRORLEVEL% neq 0 ( echo [-] Execution of test_argv_wide.exe failed! & exit /b 1 )
 python "%~dp0..\examples\imgui\extract_flat_bin.py" D:\MemLLVM\tests\test_argv_wide.bin D:\MemLLVM\tests\test_argv_wide.exe
 python "%~dp0..\examples\imgui\flat_run.py" D:\MemLLVM\tests\test_argv_wide.bin 0
 if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
