@@ -102,9 +102,14 @@ When designing or porting complex software into loaderless flat binaries, develo
   Relative paths (e.g., `fopen("config.ini", "r")`) resolve against the host process's active working directory, not the memory blob's location.
 
 #### 2. Absence of Native PE Loader Facilities
-* **Native Windows PE Resources (`.rsrc` / RC Files / Dialog Templates)**:
-  Flat binaries strip all PE section headers and Resource Directory Trees. Win32 APIs like `FindResource`, `LoadIcon`, `LoadAccelerators`, and `DialogBox` cannot function.
-  - **Best Practice**: Embed textures, fonts, audio, and shaders as inline C/C++ byte arrays or companion streaming containers (e.g., `doom1.wad`).
+* **Native Windows PE Resources (`.rsrc` / RC Files / Dialog Templates / String Tables - Fully Solved)**:
+  Traditional shellcode tools strip PE headers and the `.rsrc` section, rendering all native Win32 resource APIs (`FindResource`, `LoadString`, `DialogBox`) dysfunctional.
+  **MemLLVM provides full, end-to-end native support for the PE resource system**:
+  1. **`.rsrc` Section Preservation & Rebase Binding**: `extract_flat_bin.py` packs the compiled `.rsrc` section into the flat image, while the entry bootstrap stub dynamically binds the `MemLLVM_ResourceInfo` descriptor to the runtime image base.
+  2. **In-Memory 3-Level Resource Directory Engine**: LTL embeds a zero-dependency `IMAGE_RESOURCE_DIRECTORY` search engine supporting Type -> Name/ID -> Language lookups.
+  3. **Full Win32 Resource API Shims**: Seamlessly intercepts `FindResource(Ex)A/W`, `LoadResource`, `LockResource`, `SizeofResource`, `LoadStringA/W` (decoding 16-entry Pascal strings), `DialogBoxParamA/W`, `CreateDialogParamA/W`, `LoadMenuA/W`, `LoadAcceleratorsA/W`, `LoadIconA/W`, `LoadCursorA/W`, `LoadBitmapA/W`, and `EnumResource*` enumeration routines.
+  4. **Transparent System Module Fallback**: When `hModule` refers to an external DLL (e.g. system icons `IDI_APPLICATION`, `IDC_ARROW` in `user32.dll`), automatically delegates back to the Windows OS API.
+  5. **Compile-Time `ApiResolvePass` Import Slot Rewriting**: Rewrites `__imp_*` loads to direct pointers into `ltl.lib`, completely decoupling the binary from external `kernel32.dll`/`user32.dll` resource import thunks.
 * **Windows Manifests, ComCtl32 v6 Visual Styles & High-DPI**:
   Standard PEs rely on embedded manifests (`RT_MANIFEST`) to activate Common Controls v6 (modern visual styles) and declare DPI awareness. In a flat binary, standard Win32 dialogs fallback to classic Windows 2000 flat appearance.
   - **Best Practice**: Use self-rendered UI engines (DirectX 11 / Direct2D / Dear ImGui), or programmatically mount activation contexts via `CreateActCtx` and call `SetProcessDpiAwarenessContext`.
@@ -236,6 +241,28 @@ The PE specification allows DLLs to export functions purely by numeric index (`[
 1. Implemented an $O(1)$ runtime ordinal indexer (`funcs[ordinal - Base]`) in the bootstrap resolver with multi-hop forwarder resolution supporting both string and `#ordinal` forwarded targets with cycle detection;
 2. Pre-indexed all 2,729 Windows SDK ordinal exports across 80 system DLLs into a compile-time binary search table and added dynamic `.lib` archive header scanning for project-local dependencies;
 3. Connected `AutoLoadLibraryPass`, `ApiResolvePass`, and `GlobalPointerPass` to transparently rewrite calls and rebase vtable/global pointer slots to `MemLLVM_GetApiAddressByOrdinal`.
+</details>
+
+<details>
+<summary><b>7. Reconstructing Native PE Resource Subsystem (.rsrc) in Headless Flat Binaries</b> (Click to expand)</summary>
+
+#### The Trap:
+Windows developers extensively use `.rc` resource scripts to bundle icons, string tables (`STRINGTABLE`), dialog templates (`DIALOGEX`), menus, accelerators, and raw binary assets (`RCDATA`). In flat binaries without PE headers, calling `FindResource`, `LoadString`, or `DialogBoxParam` fails with NULL or triggers crashes.
+
+#### The Discovery:
+Win32 resource functions under `kernel32` / `user32` traverse the PE resource tree by interpreting `hModule` as the base address of a valid PE image and scanning DOS/NT headers. Flat binaries have no PE headers, so passing `GetModuleHandle(NULL)` reads the host process's resources, while passing the payload's own address returns `ERROR_RESOURCE_DATA_NOT_FOUND (1812)`. Furthermore, Clang generates `__imp_*` slot loads that normally resolve to `kernel32.lib` / `user32.lib`, re-introducing dangerous import dependencies into the flat binary.
+
+#### The Breakthrough:
+1. **Preserving and Packing `.rsrc`**: `extract_flat_bin.py` preserves the `.rsrc` section in the flat image and injects a `MemLLVM_ResourceInfo` descriptor that dynamically binds the resource base address and RVA offset at runtime startup.
+2. **In-Memory 3-Level Resource Traversal Engine**: Implemented an in-memory `IMAGE_RESOURCE_DIRECTORY` parser in `ltl/src/crt_resources.cpp` supporting both integer IDs (`MAKEINTRESOURCE`) and Unicode name strings across all three directory levels (Type -> Name/ID -> Language).
+3. **Comprehensive Win32 Resource API Shims**:
+   - Navigation & Access: `FindResource(Ex)A/W`, `LoadResource`, `LockResource`, `SizeofResource`.
+   - String Tables: `LoadStringA/W` (parsing 16-entry Pascal counted string blocks).
+   - Dialogs & Menus: `DialogBoxParamA/W` & `CreateDialogParamA/W` (via indirect dialog templates), `LoadMenuA/W`, `LoadAcceleratorsA/W`.
+   - Graphics & Icons: `LoadIconA/W`, `LoadCursorA/W`, `LoadBitmapA/W`.
+   - Enumeration: `EnumResourceTypesW`, `EnumResourceNamesW`, `EnumResourceLanguagesW`.
+   - Fallback: Transparently delegates to OS APIs when `hModule` points to external system DLLs (e.g. `IDI_APPLICATION`, `IDC_ARROW` in `user32.dll`).
+4. **Compile-Time Import Interception**: `ApiResolvePass` marks all 26 resource APIs as static shims, rewriting `__imp_*` loads directly to `ltl.lib` functions in IR, completely eliminating OS import stubs.
 </details>
 
 ---

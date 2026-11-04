@@ -366,9 +366,21 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     if (!Name.starts_with("__imp_"))
       continue;
     StringRef Api = Name.drop_front(6);
-    if (Api.starts_with("__imp_") || isStaticShimSymbol(Api) ||
-        !isKnownWindowsApi(Api))
+    if (Api.starts_with("__imp_") || !isKnownWindowsApi(Api))
       continue;
+
+    if (isStaticShimSymbol(Api)) {
+      FunctionCallee ShimFn = M.getOrInsertFunction(Api, FunctionType::get(Type::getVoidTy(M.getContext()), false));
+      Value *FnPtr = ShimFn.getCallee();
+      SmallVector<User *, 8> Users(GV.users());
+      for (User *U : Users) {
+        if (auto *LI = dyn_cast<LoadInst>(U)) {
+          LI->replaceAllUsesWith(FnPtr);
+          LI->eraseFromParent();
+        }
+      }
+      continue;
+    }
 
     for (Use &U : GV.uses()) {
       if (auto *LI = dyn_cast<LoadInst>(U.getUser()))

@@ -79,6 +79,20 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "strlen" || Name == "wcslen" || Name == "strcpy" || Name == "strncpy" ||
       Name == "GetCurrentThreadId" || Name == "GetCurrentProcessId" ||
       Name == "GetProcessHeap" || Name == "GetStdHandle" ||
+      Name == "FindResourceA" || Name == "FindResourceW" ||
+      Name == "FindResourceExA" || Name == "FindResourceExW" ||
+      Name == "LoadResource" || Name == "LockResource" || Name == "SizeofResource" ||
+      Name == "LoadStringA" || Name == "LoadStringW" ||
+      Name == "EnumResourceTypesA" || Name == "EnumResourceTypesW" ||
+      Name == "EnumResourceNamesA" || Name == "EnumResourceNamesW" ||
+      Name == "EnumResourceLanguagesA" || Name == "EnumResourceLanguagesW" ||
+      Name == "DialogBoxParamA" || Name == "DialogBoxParamW" ||
+      Name == "CreateDialogParamA" || Name == "CreateDialogParamW" ||
+      Name == "LoadMenuA" || Name == "LoadMenuW" ||
+      Name == "LoadAcceleratorsA" || Name == "LoadAcceleratorsW" ||
+      Name == "LoadIconA" || Name == "LoadIconW" ||
+      Name == "LoadCursorA" || Name == "LoadCursorW" ||
+      Name == "LoadBitmapA" || Name == "LoadBitmapW" ||
       Name == "_wassert" || Name == "_assert" ||
       Name == "floor" || Name == "ceil" || Name == "round" ||
       Name == "floorf" || Name == "ceilf" ||

@@ -103,9 +103,14 @@ MemLLVM 攻克了 C++20 语言层、虚表重定位、原子初始化、内存�
   相对路径（如 `fopen("config.ini", "r")`）完全取决于宿主进程的当前工作目录（Current Directory）。若宿主工作目录与预期不符会导致文件打开失败。
 
 #### 2. 操作系统加载器与 PE 结构级特性缺失（Absence of OS Loader Facilities）
-* **原生 PE 资源系统（`.rsrc` / RC 资源 / 图标 / 对话框模板）**：
-  扁平二进制剥离了所有 PE 节头与 Resource Directory 树。原生 Win32 资源 API（如 `FindResource`、`LoadIcon`、`LoadAccelerators`、`DialogBox`）无法使用。
-  - **避坑准则**：贴图、字体、音效、着色器等静态资产请以内联二进制数组（如十六进制 C 数组）或伴生数据包文件（如 `doom1.wad`、独立 sqlite 库）方式加载。
+* **原生 PE 资源系统（`.rsrc` / RC 资源 / 图标 / 对话框模板已全量攻克）**：
+  传统扁平机器码因剥离了 PE 节头与 Resource Directory 树，导致调用原生 Win32 资源 API（如 `FindResource`、`LoadString`、`DialogBox`）全部失效。
+  **MemLLVM 全链路原生支持 PE 资源体系**：
+  1. **`.rsrc` 物理节保留与自重定位**：构建工具链与 `extract_flat_bin.py` 保留 `.rsrc` 节并紧密排布在扁平镜像中，入口自举桩根据运行时绝对基址动态绑定 `MemLLVM_ResourceInfo`；
+  2. **轻量纯内存三级资源解析引擎**：LTL 运行时内置零依赖的 `IMAGE_RESOURCE_DIRECTORY` 解析算法，支持类型（Type）、标识（Name/ID）、语言（Language）三级树查找；
+  3. **Win32 资源 API 全套透明垫片**：全面接管 `FindResource(Ex)A/W`、`LoadResource`、`LockResource`、`SizeofResource`、`LoadStringA/W`（Pascal 变长字串表）、`DialogBoxParamA/W`、`CreateDialogParamA/W`、`LoadMenuA/W`、`LoadAcceleratorsA/W`、`LoadIconA/W`、`LoadCursorA/W`、`LoadBitmapA/W` 及 `EnumResource*` 枚举函数；
+  4. **外部系统模块透明回退**：对系统通用资源（如 `user32.dll` 系统的 `IDI_APPLICATION`、`IDC_ARROW` 等）自动透明转发回操作系统原生 API；
+  5. **编译期 `ApiResolvePass` 槽位重写**：将 Win32 资源 API 标记为静态垫片，在 IR 阶段直接将 `__imp_*` 导入槽改写为 `ltl.lib` 内部函数指针，彻底切断对操作系统 DLL 导出槽的错误导入依赖。
 * **Windows 清单与现代控件视觉样式（Manifest, ComCtl32 v6 & High-DPI）**：
   传统 PE 依靠内嵌清单（`RT_MANIFEST`）启用 Common Controls v6 现代视觉样式及高 DPI 感知。在裸二进制下，Win32 原生控件默认回退到 Windows 2000 经典扁平灰色风格。
   - **避坑准则**：如需现代视觉外观，建议采用 Direct2D / DirectX 11 / Dear ImGui 自绘渲染管线，或在代码中显式调用 `CreateActCtx` 挂载清单并调用 `SetProcessDpiAwarenessContext`。
@@ -204,6 +209,23 @@ MemLLVM 攻克了 C++20 语言层、虚表重定位、原子初始化、内存�
   1. 自举解析器实现纯 PE 导出表 $O(1)$ 序数寻址（`funcs[ordinal - Base]`）与递归转导器（深度限制防止环路，自动解析并支持转发到目标库的序数或符号名）；
   2. 离线全量提取 Windows 10/11 SDK 所有 80 个系统 `.lib` 库中多达 2,729 项序数条目，生成编译期二分哈希表；
   3. LLVM 编译管线全链路联动：`AutoLoadLibraryPass` 自动感知并预加载所属 DLL、`ApiResolvePass` 将无名调用下沉为双哈希序数寻址、`GlobalPointerPass` 自动完成虚表重构。彻底粉碎 Windows 序数黑盒壁垒！
+
+---
+
+### 坑点 7：无头扁平机器码中的原生 PE 资源系统（.rsrc）与 Win32 资源 API 重构
+* **诡异现象**：在 Windows 原生开发中，开发者大量使用 `.rc` 脚本打包图标（Icon）、字符串表（String Table）、对话框模板（Dialog Template）或自定义二进制资产（`RCDATA`）。当代码通过常规 Shellcode 打包工具转为扁平二进制后，所有资源 API（如 `FindResource`、`LoadString`、`DialogBoxParam`）全部失效返回 NULL 或引发空指针崩溃。
+* **真相大白**：Windows PE 资源系统本质上是一棵存储在 PE 文件 `.rsrc` 节区内的三级目录树（Type -> Name/ID -> Language），API 底层（如 `FindResourceW`）强制通过传入的 `HMODULE` 读取 DOS/NT 节表来定位资源目录偏移。在扁平二进制中，既没有 PE 头部也没有合法节表，传入自身内存地址直接引发 `ERROR_RESOURCE_DATA_NOT_FOUND (1812)`；传入 NULL 则会错误读到宿主进程的资源。此外，Clang 编译时对 Win32 资源 API 会产生 `__imp_*` 动态导入槽，若任由链接器解析到 `kernel32.lib` / `user32.lib`，会导致扁平化二进制陷入外部导入陷阱。
+* **终极攻克**：
+  1. **`.rsrc` 物理节保留与动态基址绑定**：`extract_flat_bin.py` 保留 `.rsrc` 物理段并打包进 `.bin`，入口自举桩根据运行时绝对基址（`RuntimeBase`）与链接期 RVA 动态重构资源基址描述符（`MemLLVM_ResourceInfo`）；
+  2. **自研轻量级纯内存三级资源解析引擎**：在 LTL 运行时（`crt_resources.cpp`）实现无操作系统依赖的资源目录检索，完整支持数字 ID（`MAKEINTRESOURCE`）与宽字符名称（Unicode Name）；
+  3. **Win32 资源全套 API 垫片（Transparent Shims）**：
+     - 基础寻址：`FindResource(Ex)A/W`、`LoadResource`、`LockResource`、`SizeofResource`；
+     - 字符串表：`LoadStringA/W`（精准解码 16 项一组的 Pascal 变长字符串块）；
+     - 界面与菜单：`DialogBoxParamA/W` / `CreateDialogParamA/W`（基于内存模板通过 `CreateDialogIndirectParam` 重建对话框）、`LoadMenuA/W`、`LoadAcceleratorsA/W`；
+     - 图标与图形：`LoadIconA/W`、`LoadCursorA/W`、`LoadBitmapA/W`；
+     - 目录枚举：`EnumResourceTypesW`、`EnumResourceNamesW`、`EnumResourceLanguagesW`；
+     - 宿主与系统模块透明回退：当 `hModule` 指向外部 DLL（如系统图标 `IDI_APPLICATION`、`IDC_ARROW`）时，自动回退到 Windows 原生 API；
+  4. **编译期 `ApiResolvePass` 槽位拦截与重写**：将上述 26 个 Win32 资源 API 标记为静态垫片符号，在 IR 阶段直接将 `__imp_*` 导入槽改写为 `ltl.lib` 内部函数指针，彻底切断对操作系统 `kernel32.dll`/`user32.dll` 资源入口的错误导入依赖！
 
 ---
 

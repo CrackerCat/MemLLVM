@@ -42,13 +42,9 @@ DIR64 = 10
 # Sections that carry no loadable content: the relocation directory is consumed
 # to build the flat reloc table, and the symbol/import tables do not exist in a
 # /nodefaultlib flat link anyway.
-# Sections that carry no loadable content: the relocation directory is consumed
-# to build the flat reloc table, and the symbol/import tables do not exist in a
-# /nodefaultlib flat link anyway.
-SKIP_SECTIONS = ('.reloc', '.edata', '.idata', '.rsrc', '.tls')
+SKIP_SECTIONS = ('.reloc', '.edata', '.idata', '.tls')
 SECTION_DIAGNOSTICS = {
-    '.tls': '[!] Notice: .tls section skipped. Native Thread Local Storage (__declspec(thread)) requires OS TEB initialization not present in flat memory binaries. Use MemLLVM thread-safe local statics or atomics.',
-    '.rsrc': '[!] Notice: .rsrc section skipped. Windows PE resource directories (icons, manifest) are not embedded in flat shellcode; embed assets as static byte arrays or load dynamically.'
+    '.tls': '[!] Notice: .tls section skipped. Native Thread Local Storage (__declspec(thread)) requires OS TEB initialization not present in flat memory binaries. Use MemLLVM thread-safe local statics or atomics.'
 }
 
 
@@ -169,7 +165,8 @@ def collect_dir64_relocs(data, pe, base_rva, total_size):
 
 def build_stub(stub_offset, orig_base, entry_offset, num_relocs,
                reloc_table_offset, orig5, pdata_info_offset=None,
-               pdata_offset=0, pdata_count=0, base_rva=0):
+               pdata_offset=0, pdata_count=0, base_rva=0,
+               rsrc_info_offset=None, rsrc_offset=0, rsrc_size=0):
     """Emit the x64 self-rebase stub. Identical encoding to build_chip8.py."""
     code = bytearray()
 
@@ -226,6 +223,26 @@ def build_stub(stub_offset, orig_base, entry_offset, num_relocs,
 
         # mov dword ptr [rdx + pdata_info_offset + 24], pdata_count
         code.extend(b'\xC7\x82' + struct.pack('<I', pdata_info_offset + 24) + struct.pack('<I', pdata_count))
+
+    # 4.6. If Resource table is present and descriptor exists, populate it:
+    if rsrc_info_offset is not None and rsrc_size > 0:
+        # rax = rdx - base_rva (real ImageBase)
+        code.extend(b'\x48\x89\xD0')                  # mov rax, rdx
+        if base_rva != 0:
+            code.extend(b'\x48\x2D' + struct.pack('<I', base_rva)) # sub rax, base_rva
+        # mov [rdx + rsrc_info_offset + 8], rax (image_base)
+        code.extend(b'\x48\x89\x82' + struct.pack('<I', rsrc_info_offset + 8))
+
+        # rax = rdx + rsrc_offset (pointer to .rsrc section start)
+        code.extend(b'\x48\x8D\x82' + struct.pack('<I', rsrc_offset)) # lea rax, [rdx + rsrc_offset]
+        # mov [rdx + rsrc_info_offset + 16], rax (rsrc_ptr)
+        code.extend(b'\x48\x89\x82' + struct.pack('<I', rsrc_info_offset + 16))
+
+        # mov dword ptr [rdx + rsrc_info_offset + 24], rsrc_size
+        code.extend(b'\xC7\x82' + struct.pack('<I', rsrc_info_offset + 24) + struct.pack('<I', rsrc_size))
+
+        # mov dword ptr [rdx + rsrc_info_offset + 28], base_rva
+        code.extend(b'\xC7\x82' + struct.pack('<I', rsrc_info_offset + 28) + struct.pack('<I', base_rva))
 
     # 5. Restore the 5 bytes we clobbered with the entry jmp.
     orig_dw, orig_b = struct.unpack('<IB', orig5)
@@ -312,6 +329,24 @@ def make_flat_bin(exe_path, out_bin_path):
             print('  [+] Exception Handling: Bound MemLLVM_PDataInfo descriptor at offset 0x%X'
                   % pdata_info_offset)
 
+    rsrc_sec = next((s for s in packed if s['name'] == '.rsrc'), None)
+    rsrc_offset = 0
+    rsrc_size = 0
+    if rsrc_sec:
+        rsrc_offset = rsrc_sec['virt_addr'] - base_rva
+        rsrc_size = rsrc_sec['span']
+        print('  [+] Resources: Preserved .rsrc (%d bytes at offset 0x%X)'
+              % (rsrc_size, rsrc_offset))
+
+    rsrc_info_offset = None
+    rsrc_magic_bytes = struct.pack('<Q', 0x4D454D4C4C564D52) # 'MEMLLVMR'
+    rsrc_magic_idx = flat_buf.find(rsrc_magic_bytes)
+    if rsrc_magic_idx != -1:
+        rsrc_info_offset = rsrc_magic_idx
+        if rsrc_size > 0:
+            print('  [+] Resources: Bound MemLLVM_ResourceInfo descriptor at offset 0x%X'
+                  % rsrc_info_offset)
+
     # Displace the first 5 bytes with a jmp into the stub; the stub puts them back.
     if total_size < 5:
         raise SystemExit('[-] flat image too small to host the entry stub')
@@ -323,11 +358,13 @@ def make_flat_bin(exe_path, out_bin_path):
     # Two-pass: the stub length depends on reloc_table_offset, which depends on
     # the stub length. The length is invariant to the value, so measure first.
     dummy = build_stub(stub_offset, orig_base, entry_offset, len(relocs), 0, orig5,
-                       pdata_info_offset, pdata_offset, pdata_count, base_rva)
+                       pdata_info_offset, pdata_offset, pdata_count, base_rva,
+                       rsrc_info_offset, rsrc_offset, rsrc_size)
     reloc_table_offset = stub_offset + len(dummy)
     stub = build_stub(stub_offset, orig_base, entry_offset, len(relocs),
                       reloc_table_offset, orig5,
-                      pdata_info_offset, pdata_offset, pdata_count, base_rva)
+                      pdata_info_offset, pdata_offset, pdata_count, base_rva,
+                      rsrc_info_offset, rsrc_offset, rsrc_size)
     assert len(stub) == len(dummy)
 
     reloc_bytes = struct.pack('<%dI' % len(relocs), *relocs) if relocs else b''
