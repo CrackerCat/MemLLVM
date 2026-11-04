@@ -87,6 +87,8 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
       continue;
     if (F.getName().starts_with("llvm.") ||
         F.getName() == "MemLLVM_GetApiAddress" ||
+        F.getName() == "MemLLVM_GetApiAddressByOrdinal" ||
+        F.getName() == "MemLLVM_GetProcAddress" ||
         isStaticShimSymbol(F.getName()) || !isKnownWindowsApi(F.getName()))
       continue;
     HasCallsToResolve = true;
@@ -113,7 +115,8 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     // Even with no call sites, GlobalPointerPass may have inserted resolver
     // calls for address-taken APIs (see below), so fall through and link it.
     Function *Existing = M.getFunction("MemLLVM_GetApiAddress");
-    if (!Existing || Existing->use_empty()) {
+    Function *ExistingOrd = M.getFunction("MemLLVM_GetApiAddressByOrdinal");
+    if ((!Existing || Existing->use_empty()) && (!ExistingOrd || ExistingOrd->use_empty())) {
       if (getenv("MEMLLVM_VERBOSE")) {
         errs() << "[MemLLVM] No external Windows API calls found in module.\n";
       }
@@ -165,7 +168,25 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     C->setSelectionKind(Comdat::Any);
     ResolverFn->setComdat(C);
     ResolverFn->setLinkage(GlobalValue::LinkOnceODRLinkage);
+
+    if (Function *OrdFn = M.getFunction("MemLLVM_GetApiAddressByOrdinal")) {
+      Comdat *COrd = M.getOrInsertComdat("MemLLVM_GetApiAddressByOrdinal");
+      COrd->setSelectionKind(Comdat::Any);
+      OrdFn->setComdat(COrd);
+      OrdFn->setLinkage(GlobalValue::LinkOnceODRLinkage);
+    }
+    if (Function *GpaFn = M.getFunction("MemLLVM_GetProcAddress")) {
+      Comdat *CGpa = M.getOrInsertComdat("MemLLVM_GetProcAddress");
+      CGpa->setSelectionKind(Comdat::Any);
+      GpaFn->setComdat(CGpa);
+      GpaFn->setLinkage(GlobalValue::LinkOnceODRLinkage);
+    }
   }
+
+  FunctionCallee ResolverByOrdinalFn = M.getOrInsertFunction(
+      "MemLLVM_GetApiAddressByOrdinal",
+      FunctionType::get(PointerType::get(M.getContext(), 0),
+                        {Type::getInt32Ty(M.getContext()), Type::getInt32Ty(M.getContext())}, false));
 
   // 3. Collect all external call sites and address-taken uses via declaration def-use chains
   SmallVector<CallBase *, 16> CallsToResolve;
@@ -178,6 +199,8 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
       continue;
     if (F.getName().starts_with("llvm.") ||
         F.getName() == "MemLLVM_GetApiAddress" ||
+        F.getName() == "MemLLVM_GetApiAddressByOrdinal" ||
+        F.getName() == "MemLLVM_GetProcAddress" ||
         isStaticShimSymbol(F.getName()) || !isKnownWindowsApi(F.getName()))
       continue;
 
@@ -210,12 +233,23 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     uint32_t ApiHash = getApiHash(ApiName);
     ResolvedCallees.insert(Callee);
 
+    std::string OrdDll;
+    uint32_t Ordinal = 0;
+    bool IsOrdinal = probeOrdinalForApi(ApiName, OrdDll, Ordinal);
+
     if (Verbose) {
-      errs() << "[MemLLVM] (" << (idx + 1) << "/" << CallsToResolve.size()
-             << ") Rewriting " << (isa<InvokeInst>(CB) ? "invoke" : "call")
-             << " to external API: " << ApiName
-             << " (ROR13: 0x" << Twine::utohexstr(ApiHash) << ") in function: "
-             << (CB->getFunction() ? CB->getFunction()->getName() : "<none>") << "\n";
+      if (IsOrdinal) {
+        errs() << "[MemLLVM] (" << (idx + 1) << "/" << CallsToResolve.size()
+               << ") Rewriting " << (isa<InvokeInst>(CB) ? "invoke" : "call")
+               << " to external ordinal API: " << ApiName << " -> "
+               << (OrdDll.empty() ? "<any>" : OrdDll) << " #" << Ordinal << "\n";
+      } else {
+        errs() << "[MemLLVM] (" << (idx + 1) << "/" << CallsToResolve.size()
+               << ") Rewriting " << (isa<InvokeInst>(CB) ? "invoke" : "call")
+               << " to external API: " << ApiName
+               << " (ROR13: 0x" << Twine::utohexstr(ApiHash) << ") in function: "
+               << (CB->getFunction() ? CB->getFunction()->getName() : "<none>") << "\n";
+      }
     }
 
     IRBuilder<> Builder(CB);
@@ -224,8 +258,17 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     } else if (CB->getFunction() && CB->getFunction()->getSubprogram()) {
       Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, CB->getFunction()->getSubprogram()));
     }
-    Value *RawFuncPtr =
-        Builder.CreateCall(ResolverFn, {Builder.getInt32(ApiHash)}, "api_ptr");
+    Value *RawFuncPtr = nullptr;
+    if (IsOrdinal) {
+      uint32_t DllHash = OrdDll.empty() ? 0 : calculateRor13(OrdDll);
+      RawFuncPtr = Builder.CreateCall(
+          ResolverByOrdinalFn,
+          {Builder.getInt32(DllHash), Builder.getInt32(Ordinal)},
+          "api_ord_ptr");
+    } else {
+      RawFuncPtr =
+          Builder.CreateCall(ResolverFn, {Builder.getInt32(ApiHash)}, "api_ptr");
+    }
 
     CB->setCalledOperand(RawFuncPtr);
   }
@@ -241,6 +284,10 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     Instruction *User = cast<Instruction>(U->getUser());
     uint32_t Hash = getApiHash(F->getName());
 
+    std::string OrdDll;
+    uint32_t Ordinal = 0;
+    bool IsOrdinal = probeOrdinalForApi(F->getName(), OrdDll, Ordinal);
+
     // A PHI operand belongs to a specific incoming edge, so the resolver call
     // has to live at the end of that predecessor block instead of before the
     // PHI itself (instructions cannot be inserted ahead of a PHI).
@@ -253,8 +300,16 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
       } else if (User->getFunction() && User->getFunction()->getSubprogram()) {
         Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, User->getFunction()->getSubprogram()));
       }
-      FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
-                                 F->getName() + ".addr");
+      if (IsOrdinal) {
+        uint32_t DllHash = OrdDll.empty() ? 0 : calculateRor13(OrdDll);
+        FnPtr = Builder.CreateCall(
+            ResolverByOrdinalFn,
+            {Builder.getInt32(DllHash), Builder.getInt32(Ordinal)},
+            F->getName() + ".ord_addr");
+      } else {
+        FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
+                                   F->getName() + ".addr");
+      }
     } else {
       IRBuilder<> Builder(User);
       if (User->getDebugLoc()) {
@@ -262,17 +317,31 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
       } else if (User->getFunction() && User->getFunction()->getSubprogram()) {
         Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, User->getFunction()->getSubprogram()));
       }
-      FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
-                                 F->getName() + ".addr");
+      if (IsOrdinal) {
+        uint32_t DllHash = OrdDll.empty() ? 0 : calculateRor13(OrdDll);
+        FnPtr = Builder.CreateCall(
+            ResolverByOrdinalFn,
+            {Builder.getInt32(DllHash), Builder.getInt32(Ordinal)},
+            F->getName() + ".ord_addr");
+      } else {
+        FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
+                                   F->getName() + ".addr");
+      }
     }
     U->set(FnPtr);
 
     if (Verbose) {
-      errs() << "[MemLLVM]   &" << F->getName() << " -> resolver(0x"
-             << Twine::utohexstr(Hash) << ") before "
-             << User->getOpcodeName() << " in "
-             << (User->getFunction() ? User->getFunction()->getName() : "<none>")
-             << "\n";
+      if (IsOrdinal) {
+        errs() << "[MemLLVM]   &" << F->getName() << " -> ordinal("
+               << (OrdDll.empty() ? "<any>" : OrdDll) << " #" << Ordinal
+               << ") before " << User->getOpcodeName() << "\n";
+      } else {
+        errs() << "[MemLLVM]   &" << F->getName() << " -> resolver(0x"
+               << Twine::utohexstr(Hash) << ") before "
+               << User->getOpcodeName() << " in "
+               << (User->getFunction() ? User->getFunction()->getName() : "<none>")
+               << "\n";
+      }
     }
   }
   if (NumOpaqueAddrUses) {
@@ -316,21 +385,37 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     const std::string &Api = P.second;
     uint32_t Hash = getApiHash(Api);
 
+    std::string OrdDll;
+    uint32_t Ordinal = 0;
+    bool IsOrdinal = probeOrdinalForApi(Api, OrdDll, Ordinal);
+
     IRBuilder<> Builder(LI);
     if (LI->getDebugLoc()) {
       Builder.SetCurrentDebugLocation(LI->getDebugLoc());
     } else if (LI->getFunction() && LI->getFunction()->getSubprogram()) {
       Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, LI->getFunction()->getSubprogram()));
     }
-    Value *FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
-                                      Api + ".imp");
+    Value *FnPtr = nullptr;
+    if (IsOrdinal) {
+      uint32_t DllHash = OrdDll.empty() ? 0 : calculateRor13(OrdDll);
+      FnPtr = Builder.CreateCall(
+          ResolverByOrdinalFn,
+          {Builder.getInt32(DllHash), Builder.getInt32(Ordinal)},
+          Api + ".ord_imp");
+      if (Verbose) {
+        errs() << "[MemLLVM]   __imp_" << Api << " -> ordinal("
+               << (OrdDll.empty() ? "<any>" : OrdDll) << " #" << Ordinal << ")\n";
+      }
+    } else {
+      FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
+                                        Api + ".imp");
+      if (Verbose) {
+        errs() << "[MemLLVM]   __imp_" << Api << " -> resolver(0x"
+               << Twine::utohexstr(Hash) << ")\n";
+      }
+    }
     LI->replaceAllUsesWith(FnPtr);
     LI->eraseFromParent();
-
-    if (Verbose) {
-      errs() << "[MemLLVM]   __imp_" << Api << " -> resolver(0x"
-             << Twine::utohexstr(Hash) << ")\n";
-    }
   }
 
   // 3. Audit for any unhandled external imports with remaining uses

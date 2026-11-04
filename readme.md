@@ -125,10 +125,16 @@ When designing or porting complex software into loaderless flat binaries, develo
 * **Direct Command Line (`GetCommandLine`) Query Pollution**:
   `GetCommandLineA/W` returns the host process's creation command line. While MemLLVM's stub reconstructs `main(argc, argv)`, libraries bypassing `main` and querying the PEB directly will observe host parameters.
 
-#### 5. Dynamic API Resolution Limits
-* **Ordinal-Only Import Functions Cannot Be Automatically Inlined**:
-  MemLLVM's `ApiResolvePass` and runtime resolver scan PE export name tables (`AddressOfNames`) using ROR13 hashing. APIs exported exclusively by ordinal (without a name string, found in legacy Winsock or private Shell functions) cannot be resolved via name hash.
-  - **Best Practice**: For ordinal-only APIs, resolve them manually using `LoadLibraryA` + `GetProcAddress(hMod, MAKEINTRESOURCE(ord))`.
+#### 5. Dynamic API Resolution & Full Ordinal Support
+* **Native & Transparent Ordinal-Only API Auto-Resolution**:
+  In the Windows ecosystem, core system DLLs such as `shlwapi.dll` (551 functions), `shell32.dll` (364 functions), `ws2_32.dll`, and `comctl32.dll` export hundreds of functions solely by integer ordinal (`[NONAME]` exports like `SHAlloc`, `SHFree`, `ConnectToConnectionPoint`), omitting function name strings from PE export tables.
+  MemLLVM provides full, end-to-end native support for ordinal-only resolution:
+  1. **SDK Ordinal Index Database**: Pre-indexes all 2,729 Windows SDK ordinal-only exports across 80 system DLLs with O(log N) compile-time binary search, plus dynamic ordinal parsing for project-local `.lib` files.
+  2. **Compile-Time IR Inlining**: `ApiResolvePass` automatically rewrites implicit calls, `invoke` exception sites, and `__imp_*` slot loads to `MemLLVM_GetApiAddressByOrdinal(dll_hash, ordinal)` with zero linker import dependencies, accompanied by proactive DLL preloading from `AutoLoadLibraryPass`.
+  3. **Global Pointer & Vtable Auto-Rebasing**: `GlobalPointerPass` automatically rebases address-taken ordinal function pointers in global variables and vtables at entry time.
+  4. **Multi-hop Forwarder Resolution & Synthetic Symbols**: The runtime bootstrap resolver natively resolves forwarders (`DLL.#ordinal` and `DLL.func`) and supports calling arbitrary private ordinals using `<dll>_Ordinal_<ord>` or `<dll>_<ord>`.
+* **Explicit Loading Boundary for Custom Non-SDK Private DLLs**:
+  If a payload depends on a completely proprietary third-party DLL that is neither in the Windows SDK database nor accompanied by an import `.lib` during compilation, the DLL must be loaded via `LoadLibraryA("custom.dll")` to populate the PEB module list before resolving functions from it.
 
 #### 6. Modern OS Security Mitigations
 * **W^X and DEP Memory Protection**:
@@ -215,6 +221,21 @@ Windows x64 employs a strictly table-driven exception dispatch model. When `_Cxx
 1. Compiled `ltl/src/crt_exceptions.cpp` specifically with `/EHsc` to preserve full `.pdata` and `.xdata` unwind tables.
 2. Updated `extract_flat_bin.py` to preserve and extract the `.pdata` section into the flat image.
 3. In the bootstrap self-rebase stub, dynamically bound the `MEMLLVME` descriptor with the runtime image base, `.pdata` pointer, and count. This seamlessly drives `RtlAddFunctionTable` and `RtlDeleteFunctionTable` for zero-overhead, flawless C++ exception handling (`try`/`catch`/`throw`/rethrow) and RAII stack unwinding in flat shellcode!
+</details>
+
+<details>
+<summary><b>6. Undocumented Ordinal-Only ([NONAME]) Exports & Multi-Hop Forwarder Chains</b> (Click to expand)</summary>
+
+#### The Trap:
+Calling common Windows Shell or networking APIs (such as `SHAlloc`, `SHFree`, or `ConnectToConnectionPoint`) works normally in a standard executable, but when converted into flat shellcode, calls crash immediately with a null pointer (`0x00000000`) or linger as unresolved link-time imports.
+
+#### The Discovery:
+The PE specification allows DLLs to export functions purely by numeric index (`[NONAME]`), omitting function name strings from `AddressOfNames`. `shlwapi.dll` alone contains 551 ordinal-only exports, and `shell32.dll` contains 364. Standard ROR13 export table scanners return NULL. Furthermore, many ordinals are forwarded to other libraries (e.g. `SHUNIMPL.#429` or `NTDLL.RtlAllocateHeap`); naively jumping to the exported RVA executes ASCII forwarder string data instead of machine code!
+
+#### The Breakthrough:
+1. Implemented an $O(1)$ runtime ordinal indexer (`funcs[ordinal - Base]`) in the bootstrap resolver with multi-hop forwarder resolution supporting both string and `#ordinal` forwarded targets with cycle detection;
+2. Pre-indexed all 2,729 Windows SDK ordinal exports across 80 system DLLs into a compile-time binary search table and added dynamic `.lib` archive header scanning for project-local dependencies;
+3. Connected `AutoLoadLibraryPass`, `ApiResolvePass`, and `GlobalPointerPass` to transparently rewrite calls and rebase vtable/global pointer slots to `MemLLVM_GetApiAddressByOrdinal`.
 </details>
 
 ---

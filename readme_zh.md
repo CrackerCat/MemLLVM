@@ -126,10 +126,16 @@ MemLLVM 攻克了 C++20 语言层、虚表重定位、原子初始化、内存�
 * **直接命令行查询污染（`GetCommandLine`）**：
   Win32 API `GetCommandLineA/W` 查询的是宿主进程在操作系统创建时的全局命令行字符串。虽然 MemLLVM 的引导桩能够重构 `main(argc, argv)`，但若第三方库绕过 `main` 的参数直接调用 `GetCommandLineW()`，将读到宿主进程的命令参数。
 
-#### 5. 符号动态解析的边界与限制（API Dynamic Resolution Limits）
-* **仅按序数导出（Ordinal-Only）的隐式导入无法自动解析**：
-  MemLLVM 的 `ApiResolvePass` 与自举解析器依赖遍历 PE 导出表的名称表（`AddressOfNames`）并计算 ROR13 哈希。对于极少数仅通过序号导出、不包含函数名的 API（如部分老旧 Winsock、COM 内部函数或 Shell 专有接口），无法通过名称哈希自动内联解析。
-  - **避坑准则**：对于无名序数导出，需在代码中显式通过 `LoadLibraryA` + `GetProcAddress(hMod, MAKEINTRESOURCE(ord))` 获取。
+#### 5. 符号动态解析的边界与全序数支持（API Dynamic Resolution & Ordinal Support）
+* **全量支持按序数导出（Ordinal-Only）API 自动重定向与静态索引**：
+  在 Windows 生态中，诸如 `shlwapi.dll`（多达 551 个）、`shell32.dll`（多达 364 个）、`ws2_32.dll`、`comctl32.dll` 等核心动态库存在大量不包含函数名字符串、仅能通过序号引用的隐藏/无名 API（`[NONAME]` 导出，如 `SHAlloc`、`SHFree`、`ConnectToConnectionPoint`）。
+  MemLLVM 全面攻克了序数导出解析难题：
+  1. **SDK 全量序数数据库**：内置收录 Windows SDK 全部 80 个核心系统 DLL 的 2,729 个无名序数导出符号映射，并支持项目私有 `.lib` 库动态序数提取；
+  2. **编译期全透明内联改写**：`ApiResolvePass` 自动将序数 API 的直接调用、`invoke` 异常调用及 `__imp_*` 导入槽改写为 `MemLLVM_GetApiAddressByOrdinal(dll_hash, ordinal)`，并由 `AutoLoadLibraryPass` 自动补齐所属 DLL 的预加载；
+  3. **全局函数指针与虚表自动重定位**：`GlobalPointerPass` 支持在载荷入口自动将包含序数 API 地址的全局结构体与虚表指针重构为运行时真实函数地址；
+  4. **原生多级转导链（Forwarder Chain）与合成符号**：自举解析器全面支持 `DLL.#ordinal` 转导解析，并支持 `<dll>_Ordinal_<ord>`、`Ordinal<ord>` 语法直接调用任意无名序数接口。
+* **极度冷门非 SDK 第三方库的显式加载边界**：
+  若载荷依赖某个未在 Windows SDK 中登记、且未提供导入库 `.lib` 供扫描的完全专有/第三方私有 DLL，则需在代码中先调用 `LoadLibraryA("custom.dll")` 将其加载进宿主 PEB 模块链表后方可解析。
 
 #### 6. 现代操作系统安全防护策略对抗（OS Security Mitigations）
 * **W^X 与 DEP 内存执行权限**：
@@ -188,6 +194,16 @@ MemLLVM 攻克了 C++20 语言层、虚表重定位、原子初始化、内存�
   1. 为 `ltl/src/crt_exceptions.cpp` 单独开启 `/EHsc` 编译，生成完整的 `.pdata` 与 `.xdata` 异常元数据；
   2. 扁平打包工具 `extract_flat_bin.py` 自动保留并提取 `.pdata` 节区；
   3. 在二进制自举引导桩中，通过动态 `MEMLLVME` 描述符在内存中自动写入真实的加载基址、`.pdata` 运行时指针与条目数，无缝驱动 `RtlAddFunctionTable` 向 Windows 内核完成自注册与反注册。彻底实现纯内存裸二进制环境下完美的 C++ 异常捕获与 RAII 局部对象析构展开！
+
+---
+
+### 坑点 6：Windows 隐藏深渊——仅按序数导出（Ordinal-Only）API 的解析陷阱与转导链（Export Forwarder）攻克
+* **诡异现象**：在调用 Windows Shell 或老旧网络 API（例如 `SHAlloc`、`SHFree`、`ConnectToConnectionPoint` 等）时，代码在常规 EXE 下链接运行一切正常，但放入扁平化内存代码后直接崩在空指针调用（`0x0`）或引发静态未定义导入符号。
+* **真相大白**：Windows PE 规范中，DLL 导出函数并不强制包含名称。`shlwapi.dll` 拥有 551 个 `[NONAME]` 导出，`shell32.dll` 拥有 364 个。PE 导出表的 `AddressOfNames` 中压根没有它们的字符串，常规 ROR13 名称哈希遍历自然会返回 NULL。更有甚者，部分序数导出还是跨 DLL 转导（Forwarder），例如转导为 `SHUNIMPL.#429` 甚至是带名称的转导，单纯读偏移会直接踩中转导字符串所在的非可执行内存地址！
+* **终极攻克**：
+  1. 自举解析器实现纯 PE 导出表 $O(1)$ 序数寻址（`funcs[ordinal - Base]`）与递归转导器（深度限制防止环路，自动解析并支持转发到目标库的序数或符号名）；
+  2. 离线全量提取 Windows 10/11 SDK 所有 80 个系统 `.lib` 库中多达 2,729 项序数条目，生成编译期二分哈希表；
+  3. LLVM 编译管线全链路联动：`AutoLoadLibraryPass` 自动感知并预加载所属 DLL、`ApiResolvePass` 将无名调用下沉为双哈希序数寻址、`GlobalPointerPass` 自动完成虚表重构。彻底粉碎 Windows 序数黑盒壁垒！
 
 ---
 

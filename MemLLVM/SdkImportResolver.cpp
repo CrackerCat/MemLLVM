@@ -1,6 +1,7 @@
 #include "SdkImportResolver.h"
 #include "MemLLVMUtils.h"
 #include "SdkImportIndexData.h"
+#include "SdkOrdinalIndexData.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -41,6 +42,7 @@ private:
   std::vector<std::string> DllNames;
   std::vector<SdkApiEntry> Entries;
   std::unordered_map<std::string, std::string> DynamicCache;
+  std::unordered_map<std::string, std::pair<std::string, uint16_t>> DynamicOrdinalCache;
   std::unordered_map<std::string, bool> ApiCheckCache;
   std::unordered_map<std::string, std::string> ApiDllCache;
 
@@ -128,6 +130,10 @@ private:
         continue;
 
       DynamicCache[std::string(sym, symLen)] = lowerDll;
+      uint16_t nameType = hdr->NameType;
+      if (nameType == 0) {
+        DynamicOrdinalCache[std::string(sym, symLen)] = { lowerDll, (uint32_t)hdr->Ordinal };
+      }
     }
   }
 
@@ -234,6 +240,82 @@ public:
     }
   }
 
+  bool probeOrdinal(StringRef ApiName, std::string &OutDll, uint32_t &OutOrdinal) {
+    if (ApiName.empty() || ApiName.starts_with("?") || ApiName.starts_with("llvm."))
+      return false;
+
+    init();
+    std::string s = ApiName.str();
+
+    // 1. Check local scanned .lib ordinal cache
+    auto dynIt = DynamicOrdinalCache.find(s);
+    if (dynIt != DynamicOrdinalCache.end()) {
+      OutDll = dynIt->second.first;
+      OutOrdinal = dynIt->second.second;
+      return true;
+    }
+
+    // 2. Check Windows SDK pre-indexed ordinal database (2,729 entries)
+    uint32_t h = calculateRor13(ApiName);
+    auto it = std::lower_bound(
+        g_SdkOrdinalEntries, g_SdkOrdinalEntries + g_SdkOrdinalCount, h,
+        [](const SdkOrdinalEntry &e, uint32_t val) { return e.symHash < val; });
+    if (it != g_SdkOrdinalEntries + g_SdkOrdinalCount && it->symHash == h) {
+      OutDll = g_SdkOrdinalDlls[it->dllIndex];
+      OutOrdinal = it->ordinal;
+      return true;
+    }
+
+    // 3. Scan local libs if not yet done
+    scanLocalLibsForApi(ApiName);
+    dynIt = DynamicOrdinalCache.find(s);
+    if (dynIt != DynamicOrdinalCache.end()) {
+      OutDll = dynIt->second.first;
+      OutOrdinal = dynIt->second.second;
+      return true;
+    }
+
+    // 4. Pattern matching for synthetic/explicit ordinal symbols
+    // e.g. "shlwapi_12", "shell32_701", "ws2_32_23", "Ordinal_12", "Ordinal12"
+    StringRef S = ApiName;
+    if (S.starts_with("__imp_")) S = S.drop_front(6);
+    if (S.starts_with("_")) S = S.drop_front(1);
+
+    size_t lastUnder = S.rfind('_');
+    if (lastUnder != StringRef::npos) {
+      StringRef prefix = S.substr(0, lastUnder);
+      StringRef numStr = S.substr(lastUnder + 1);
+      if (prefix.ends_with_insensitive("ordinal") || prefix.ends_with_insensitive("ord")) {
+        size_t prevUnder = prefix.rfind('_');
+        if (prevUnder != StringRef::npos) {
+          prefix = prefix.substr(0, prevUnder);
+        }
+      }
+      unsigned long long ord = 0;
+      if (!numStr.getAsInteger(10, ord) && ord > 0 && ord <= 0xFFFF) {
+        std::string dll = prefix.lower();
+        StringRef dllRef(dll);
+        if (!dllRef.ends_with(".dll") && !dllRef.ends_with(".drv")) dll += ".dll";
+        OutDll = dll;
+        OutOrdinal = (uint32_t)ord;
+        return true;
+      }
+    }
+
+    if (S.starts_with_insensitive("ordinal") || S.starts_with_insensitive("ord")) {
+      StringRef numStr = S.starts_with_insensitive("ordinal") ? S.drop_front(7) : S.drop_front(3);
+      if (numStr.starts_with("_")) numStr = numStr.drop_front(1);
+      unsigned long long ord = 0;
+      if (!numStr.getAsInteger(10, ord) && ord > 0 && ord <= 0xFFFF) {
+        OutDll = "";
+        OutOrdinal = (uint32_t)ord;
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   std::string resolve(StringRef ApiName) {
     if (ApiName.empty() || ApiName.starts_with("?") || ApiName.starts_with("llvm."))
       return "";
@@ -242,6 +324,13 @@ public:
     auto cacheIt = ApiDllCache.find(s);
     if (cacheIt != ApiDllCache.end())
       return cacheIt->second;
+
+    std::string ordDll;
+    uint32_t ord = 0;
+    if (probeOrdinal(ApiName, ordDll, ord) && !ordDll.empty()) {
+      ApiDllCache[s] = ordDll;
+      return ordDll;
+    }
 
     init();
 
@@ -312,6 +401,13 @@ public:
     if (cacheIt != ApiCheckCache.end())
       return cacheIt->second;
 
+    std::string ordDll;
+    uint32_t ord = 0;
+    if (probeOrdinal(ApiName, ordDll, ord)) {
+      ApiCheckCache[s] = true;
+      return true;
+    }
+
 #ifdef _WIN32
     static HMODULE hK32 = GetModuleHandleA("kernel32.dll");
     static HMODULE hNt = GetModuleHandleA("ntdll.dll");
@@ -364,6 +460,10 @@ std::string probeRequiredDllForApi(StringRef ApiName) {
 
 bool isKnownWindowsApi(StringRef ApiName) {
   return SdkImportResolver::get().isApi(ApiName);
+}
+
+bool probeOrdinalForApi(StringRef ApiName, std::string &OutDll, uint32_t &OutOrdinal) {
+  return SdkImportResolver::get().probeOrdinal(ApiName, OutDll, OutOrdinal);
 }
 
 } // namespace memllvm
