@@ -1,6 +1,7 @@
 #include "MemLLVM.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -259,6 +260,11 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
         // 3. Replace CI with MemLLVM_GetThreadLocalAddress(IndexGV, AllocSize, TemplGV)
         IRBuilder<> B(CI);
+        if (CI->getDebugLoc()) {
+          B.SetCurrentDebugLocation(CI->getDebugLoc());
+        } else if (CI->getFunction() && CI->getFunction()->getSubprogram()) {
+          B.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, CI->getFunction()->getSubprogram()));
+        }
         Value *Res = B.CreateCall(GetTlsCallee, {IndexGV, ConstantInt::get(Int64Ty, AllocSize), TemplGV});
         CI->replaceAllUsesWith(Res);
         CI->eraseFromParent();

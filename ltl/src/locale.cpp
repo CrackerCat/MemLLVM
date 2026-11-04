@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <ios>
 #include <locale>
 #include <xlocinfo>
@@ -329,3 +332,392 @@ FILE* __cdecl _Fiopen(const wchar_t* name, ios_base::openmode mode, int) {
 }
 
 } // namespace std
+
+// ============================================================================
+// MSVC STL String-to-Number Parsing & Buffer Reversal Primitives
+// Satisfies std::istream >> [int|float|double], xlocnum, and vector algorithms
+// ============================================================================
+
+extern "C" {
+
+unsigned long long __cdecl _Stoullx(
+    const char* s, char** endptr, int base, int* perr) noexcept {
+    constexpr int _Base_max = 36;
+    static constexpr char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    static constexpr char ndigs[_Base_max + 1] = {
+        0, 0, 65, 41, 33, 28, 25, 23, 22, 21, 20, 19, 18, 18, 17, 17, 17, 16,
+        16, 16, 15, 15, 15, 15, 14, 14, 14, 14, 14, 14, 14, 13, 13, 13, 13, 13, 13
+    };
+
+    if (perr != nullptr) {
+        *perr = 0;
+    }
+
+    const char* sc = s;
+    while (*sc == ' ' || (*sc >= 0x09 && *sc <= 0x0D)) {
+        ++sc;
+    }
+
+    char sign = (*sc == '-' || *sc == '+') ? *sc++ : '+';
+    if (base < 0 || base == 1 || _Base_max < base) {
+        if (endptr != nullptr) {
+            *endptr = const_cast<char*>(s);
+        }
+        return 0;
+    }
+
+    if (0 < base) {
+        if (base == 16 && *sc == '0' && (sc[1] == 'x' || sc[1] == 'X')) {
+            sc += 2;
+        }
+    } else if (*sc != '0') {
+        base = 10;
+    } else if (sc[1] == 'x' || sc[1] == 'X') {
+        base = 16;
+        sc += 2;
+    } else {
+        base = 8;
+    }
+
+    const char* s1 = sc;
+    while (*sc == '0') {
+        ++sc;
+    }
+
+    unsigned long long x = 0;
+    unsigned long long y = 0;
+    char dig = 0;
+    const char* s2 = sc;
+    const char* sd = nullptr;
+
+    for (; (sd = static_cast<const char*>(memchr(&digits[0], (sc[0] >= 'A' && sc[0] <= 'Z') ? (sc[0] + ('a' - 'A')) : sc[0], base))) != nullptr;
+         ++sc) {
+        y = x;
+        dig = static_cast<char>(sd - digits);
+        x = x * base + dig;
+    }
+
+    if (s1 == sc) {
+        if (endptr != nullptr) {
+            *endptr = const_cast<char*>(s);
+        }
+        return 0;
+    }
+
+    ptrdiff_t n = sc - s2 - ndigs[base];
+    if (n >= 0 && (0 < n || x < x - dig || (x - dig) / base != y)) {
+        errno = 34; // ERANGE
+        if (perr != nullptr) {
+            *perr = 1;
+        }
+        x = 0xFFFFFFFFFFFFFFFFULL;
+        sign = '+';
+    }
+
+    if (sign == '-') {
+        x = 0 - x;
+    }
+
+    if (endptr != nullptr) {
+        *endptr = const_cast<char*>(sc);
+    }
+
+    return x;
+}
+
+unsigned long long __cdecl _Stoull(const char* s, char** endptr, int base) noexcept {
+    return _Stoullx(s, endptr, base, nullptr);
+}
+
+long long __cdecl _Stollx(const char* s, char** endptr, int base, int* perr) noexcept {
+    char* se = nullptr;
+    if (endptr == nullptr) {
+        endptr = &se;
+    }
+
+    const char* sc = s;
+    while (*sc == ' ' || (*sc >= 0x09 && *sc <= 0x0D)) {
+        ++sc;
+    }
+
+    char sign = (*sc == '-' || *sc == '+') ? *sc++ : '+';
+    unsigned long long x = _Stoullx(sc, endptr, base, perr);
+    if (sc == *endptr) {
+        *endptr = const_cast<char*>(s);
+    }
+
+    if ((s == *endptr && x != 0) || (sign == '+' && 0x7FFFFFFFFFFFFFFFULL < x) ||
+        (sign == '-' && (1ULL << 63) < x)) {
+        errno = 34; // ERANGE
+        if (perr != nullptr) {
+            *perr = 1;
+        }
+        return sign == '-' ? (-9223372036854775807LL - 1LL) : 9223372036854775807LL;
+    }
+
+    return static_cast<long long>(sign == '-' ? 0 - x : x);
+}
+
+long long __cdecl _Stoll(const char* s, char** endptr, int base) noexcept {
+    return _Stollx(s, endptr, base, nullptr);
+}
+
+unsigned long __cdecl _Stoulx(const char* s, char** endptr, int base, int* perr) noexcept {
+    constexpr int _Base_max = 36;
+    static constexpr char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    static constexpr char ndigs[_Base_max + 1] = {
+        0, 0, 33, 21, 17, 14, 13, 12, 11, 11, 10, 10, 9, 9, 9, 9, 9, 8, 8, 8,
+        8, 8, 8, 8, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
+    };
+
+    if (perr != nullptr) {
+        *perr = 0;
+    }
+
+    const char* sc = s;
+    while (*sc == ' ' || (*sc >= 0x09 && *sc <= 0x0D)) {
+        ++sc;
+    }
+
+    char sign = (*sc == '-' || *sc == '+') ? *sc++ : '+';
+    if (base < 0 || base == 1 || _Base_max < base) {
+        if (endptr != nullptr) {
+            *endptr = const_cast<char*>(s);
+        }
+        return 0;
+    }
+
+    if (0 < base) {
+        if (base == 16 && *sc == '0' && (sc[1] == 'x' || sc[1] == 'X')) {
+            sc += 2;
+        }
+    } else if (*sc != '0') {
+        base = 10;
+    } else if (sc[1] == 'x' || sc[1] == 'X') {
+        base = 16;
+        sc += 2;
+    } else {
+        base = 8;
+    }
+
+    const char* s1 = sc;
+    while (*sc == '0') {
+        ++sc;
+    }
+
+    unsigned long x = 0;
+    unsigned long y = 0;
+    char dig = 0;
+    const char* s2 = sc;
+    const char* sd = nullptr;
+
+    for (; (sd = static_cast<const char*>(memchr(&digits[0], (sc[0] >= 'A' && sc[0] <= 'Z') ? (sc[0] + ('a' - 'A')) : sc[0], base))) != nullptr;
+         ++sc) {
+        y = x;
+        dig = static_cast<char>(sd - digits);
+        x = x * base + dig;
+    }
+
+    if (s1 == sc) {
+        if (endptr != nullptr) {
+            *endptr = const_cast<char*>(s);
+        }
+        return 0;
+    }
+
+    ptrdiff_t n = sc - s2 - ndigs[base];
+    if (n >= 0 && (0 < n || x < x - dig || (x - dig) / base != y)) {
+        errno = 34; // ERANGE
+        if (perr != nullptr) {
+            *perr = 1;
+        }
+        x = 0xFFFFFFFFUL;
+        sign = '+';
+    }
+
+    if (sign == '-') {
+        x = 0 - x;
+    }
+
+    if (endptr != nullptr) {
+        *endptr = const_cast<char*>(sc);
+    }
+
+    return x;
+}
+
+unsigned long __cdecl _Stoul(const char* s, char** endptr, int base) noexcept {
+    return _Stoulx(s, endptr, base, nullptr);
+}
+
+long __cdecl _Stolx(const char* s, char** endptr, int base, int* perr) noexcept {
+    char* se = nullptr;
+    if (endptr == nullptr) {
+        endptr = &se;
+    }
+
+    const char* sc = s;
+    while (*sc == ' ' || (*sc >= 0x09 && *sc <= 0x0D)) {
+        ++sc;
+    }
+
+    char sign = (*sc == '-' || *sc == '+') ? *sc++ : '+';
+    unsigned long x = _Stoulx(sc, endptr, base, perr);
+    if (sc == *endptr) {
+        *endptr = const_cast<char*>(s);
+    }
+
+    if ((s == *endptr && x != 0) || (sign == '+' && 0x7FFFFFFFL < x) ||
+        (sign == '-' && (1UL << 31) < x)) {
+        errno = 34; // ERANGE
+        if (perr != nullptr) {
+            *perr = 1;
+        }
+        return sign == '-' ? (-2147483647L - 1L) : 2147483647L;
+    }
+
+    return static_cast<long>(sign == '-' ? 0 - x : x);
+}
+
+long __cdecl _Stol(const char* s, char** endptr, int base) noexcept {
+    return _Stolx(s, endptr, base, nullptr);
+}
+
+float __cdecl _Stofx(const char* s, char** endptr, long pten, int* perr) noexcept {
+    int orig = errno;
+    errno = 0;
+    float val = static_cast<float>(strtod(s, endptr));
+    if (perr != nullptr) {
+        *perr = errno;
+    }
+    errno = orig;
+    if (pten != 0) {
+        double factor = 1.0;
+        long p = pten < 0 ? -pten : pten;
+        for (long i = 0; i < p; ++i) factor *= 10.0;
+        if (pten < 0) val = static_cast<float>(val / factor);
+        else val = static_cast<float>(val * factor);
+    }
+    return val;
+}
+
+float __cdecl _Stof(const char* s, char** endptr, long pten) noexcept {
+    return _Stofx(s, endptr, pten, nullptr);
+}
+
+double __cdecl _Stodx(const char* s, char** endptr, long pten, int* perr) noexcept {
+    int orig = errno;
+    errno = 0;
+    double val = strtod(s, endptr);
+    if (perr != nullptr) {
+        *perr = errno;
+    }
+    errno = orig;
+    if (pten != 0) {
+        double factor = 1.0;
+        long p = pten < 0 ? -pten : pten;
+        for (long i = 0; i < p; ++i) factor *= 10.0;
+        if (pten < 0) val = val / factor;
+        else val = val * factor;
+    }
+    return val;
+}
+
+double __cdecl _Stod(const char* s, char** endptr, long pten) noexcept {
+    return _Stodx(s, endptr, pten, nullptr);
+}
+
+long double __cdecl _Stoldx(const char* s, char** endptr, long pten, int* perr) noexcept {
+    return static_cast<long double>(_Stodx(s, endptr, pten, perr));
+}
+
+long double __cdecl _Stold(const char* s, char** endptr, long pten) noexcept {
+    return _Stodx(s, endptr, pten, nullptr);
+}
+
+// Vector trivial reversing & copy implementations for MSVC STL
+void __cdecl __std_reverse_trivially_swappable_1(void* _First, void* _Last) noexcept {
+    auto first = static_cast<unsigned char*>(_First);
+    auto last = static_cast<unsigned char*>(_Last);
+    while (first < last) {
+        --last;
+        unsigned char t = *first;
+        *first = *last;
+        *last = t;
+        ++first;
+    }
+}
+
+void __cdecl __std_reverse_trivially_swappable_2(void* _First, void* _Last) noexcept {
+    auto first = static_cast<unsigned short*>(_First);
+    auto last = static_cast<unsigned short*>(_Last);
+    while (first < last) {
+        --last;
+        unsigned short t = *first;
+        *first = *last;
+        *last = t;
+        ++first;
+    }
+}
+
+void __cdecl __std_reverse_trivially_swappable_4(void* _First, void* _Last) noexcept {
+    auto first = static_cast<unsigned int*>(_First);
+    auto last = static_cast<unsigned int*>(_Last);
+    while (first < last) {
+        --last;
+        unsigned int t = *first;
+        *first = *last;
+        *last = t;
+        ++first;
+    }
+}
+
+void __cdecl __std_reverse_trivially_swappable_8(void* _First, void* _Last) noexcept {
+    auto first = static_cast<unsigned long long*>(_First);
+    auto last = static_cast<unsigned long long*>(_Last);
+    while (first < last) {
+        --last;
+        unsigned long long t = *first;
+        *first = *last;
+        *last = t;
+        ++first;
+    }
+}
+
+void __cdecl __std_reverse_copy_trivially_copyable_1(const void* _First, const void* _Last, void* _Dest) noexcept {
+    auto first = static_cast<const unsigned char*>(_First);
+    auto last = static_cast<const unsigned char*>(_Last);
+    auto dest = static_cast<unsigned char*>(_Dest);
+    while (last > first) {
+        *dest++ = *--last;
+    }
+}
+
+void __cdecl __std_reverse_copy_trivially_copyable_2(const void* _First, const void* _Last, void* _Dest) noexcept {
+    auto first = static_cast<const unsigned short*>(_First);
+    auto last = static_cast<const unsigned short*>(_Last);
+    auto dest = static_cast<unsigned short*>(_Dest);
+    while (last > first) {
+        *dest++ = *--last;
+    }
+}
+
+void __cdecl __std_reverse_copy_trivially_copyable_4(const void* _First, const void* _Last, void* _Dest) noexcept {
+    auto first = static_cast<const unsigned int*>(_First);
+    auto last = static_cast<const unsigned int*>(_Last);
+    auto dest = static_cast<unsigned int*>(_Dest);
+    while (last > first) {
+        *dest++ = *--last;
+    }
+}
+
+void __cdecl __std_reverse_copy_trivially_copyable_8(const void* _First, const void* _Last, void* _Dest) noexcept {
+    auto first = static_cast<const unsigned long long*>(_First);
+    auto last = static_cast<const unsigned long long*>(_Last);
+    auto dest = static_cast<unsigned long long*>(_Dest);
+    while (last > first) {
+        *dest++ = *--last;
+    }
+}
+
+} // extern "C"

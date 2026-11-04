@@ -63,6 +63,7 @@ bool isStaticShimSymbol(StringRef Name) {
   if (Name.starts_with("_Mtx_") || Name.starts_with("_Cnd_") ||
       Name.starts_with("_Thrd_") || Name.starts_with("__emutls_") ||
       Name.starts_with("__std_") || Name.starts_with("__CxxFrameHandler") ||
+      Name.starts_with("_Sto") ||
       Name == "__C_specific_handler" || Name == "_CxxThrowException" ||
       Name.starts_with("__chkstk") ||
       Name.contains("@std@@") || Name.contains("@stdext@@") ||

@@ -3,6 +3,7 @@
 #include "ResolverBitcode.h"
 #include "SdkImportResolver.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
@@ -218,6 +219,11 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     IRBuilder<> Builder(CB);
+    if (CB->getDebugLoc()) {
+      Builder.SetCurrentDebugLocation(CB->getDebugLoc());
+    } else if (CB->getFunction() && CB->getFunction()->getSubprogram()) {
+      Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, CB->getFunction()->getSubprogram()));
+    }
     Value *RawFuncPtr =
         Builder.CreateCall(ResolverFn, {Builder.getInt32(ApiHash)}, "api_ptr");
 
@@ -242,10 +248,20 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     if (auto *PN = dyn_cast<PHINode>(User)) {
       BasicBlock *Incoming = PN->getIncomingBlock(*U);
       IRBuilder<> Builder(Incoming->getTerminator());
+      if (User->getDebugLoc()) {
+        Builder.SetCurrentDebugLocation(User->getDebugLoc());
+      } else if (User->getFunction() && User->getFunction()->getSubprogram()) {
+        Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, User->getFunction()->getSubprogram()));
+      }
       FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
                                  F->getName() + ".addr");
     } else {
       IRBuilder<> Builder(User);
+      if (User->getDebugLoc()) {
+        Builder.SetCurrentDebugLocation(User->getDebugLoc());
+      } else if (User->getFunction() && User->getFunction()->getSubprogram()) {
+        Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, User->getFunction()->getSubprogram()));
+      }
       FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
                                  F->getName() + ".addr");
     }
@@ -301,6 +317,11 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     uint32_t Hash = getApiHash(Api);
 
     IRBuilder<> Builder(LI);
+    if (LI->getDebugLoc()) {
+      Builder.SetCurrentDebugLocation(LI->getDebugLoc());
+    } else if (LI->getFunction() && LI->getFunction()->getSubprogram()) {
+      Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, LI->getFunction()->getSubprogram()));
+    }
     Value *FnPtr = Builder.CreateCall(ResolverFn, {Builder.getInt32(Hash)},
                                       Api + ".imp");
     LI->replaceAllUsesWith(FnPtr);

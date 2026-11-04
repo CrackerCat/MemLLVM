@@ -4,6 +4,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -174,9 +175,16 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
     InsertBefore = &*TuInit->getEntryBlock().getFirstInsertionPt();
   }
 
-  IRBuilder<> Builder(InsertBefore);
   LLVMContext &Ctx = M.getContext();
   Type *Int32Ty = Type::getInt32Ty(Ctx);
+
+  IRBuilder<> Builder(InsertBefore);
+  Function *TargetFn = InsertBefore->getFunction();
+  if (InsertBefore->getDebugLoc()) {
+    Builder.SetCurrentDebugLocation(InsertBefore->getDebugLoc());
+  } else if (TargetFn && TargetFn->getSubprogram()) {
+    Builder.SetCurrentDebugLocation(DILocation::get(Ctx, 0, 0, TargetFn->getSubprogram()));
+  }
 
   // Declared lazily: only modules with address-taken APIs need it, and
   // ApiResolvePass links the real body afterwards.

@@ -3,6 +3,7 @@
 #include "SdkImportResolver.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -100,6 +101,12 @@ PreservedAnalyses AutoLoadLibraryPass::run(Module &M, ModuleAnalysisManager &MAM
   }
 
   IRBuilder<> Builder(InsertBefore);
+  Function *TargetFn = InsertBefore->getFunction();
+  if (InsertBefore->getDebugLoc()) {
+    Builder.SetCurrentDebugLocation(InsertBefore->getDebugLoc());
+  } else if (TargetFn && TargetFn->getSubprogram()) {
+    Builder.SetCurrentDebugLocation(DILocation::get(Ctx, 0, 0, TargetFn->getSubprogram()));
+  }
 
   for (const std::string &dllName : RequiredDlls) {
     errs() << "[MemLLVM] Proactively injecting LoadLibraryA(\"" << dllName << "\") into "

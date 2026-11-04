@@ -3,6 +3,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -59,6 +60,11 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
         }
 
         IRBuilder<> Builder(InsertBefore);
+        if (InsertBefore->getDebugLoc()) {
+          Builder.SetCurrentDebugLocation(InsertBefore->getDebugLoc());
+        } else if (DISubprogram *SP = EntryFn->getSubprogram()) {
+          Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, SP));
+        }
 
         // First dispatch cross-TU initializers registered in .mli section (GlobalPointerPass, non-entry ctors, DLL preloads)
         FunctionCallee DispatchInitsFn = M.getOrInsertFunction("__memllvm_dispatch_tu_inits",
@@ -110,6 +116,11 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
       }
     }
     IRBuilder<> Builder(InsertBefore);
+    if (InsertBefore->getDebugLoc()) {
+      Builder.SetCurrentDebugLocation(InsertBefore->getDebugLoc());
+    } else if (DISubprogram *SP = EntryFn->getSubprogram()) {
+      Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, SP));
+    }
     FunctionCallee DispatchInitsFn = M.getOrInsertFunction("__memllvm_dispatch_tu_inits",
         FunctionType::get(Type::getVoidTy(M.getContext()), false));
     Builder.CreateCall(DispatchInitsFn);
@@ -136,6 +147,11 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
         }
       }
       IRBuilder<> Builder(InsertBefore);
+      if (InsertBefore->getDebugLoc()) {
+        Builder.SetCurrentDebugLocation(InsertBefore->getDebugLoc());
+      } else if (DISubprogram *SP = EntryFn->getSubprogram()) {
+        Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, SP));
+      }
       Builder.CreateCall(InitCoutFn);
       Changed = true;
       if (getenv("MEMLLVM_VERBOSE")) {
@@ -169,6 +185,11 @@ PreservedAnalyses GlobalLifecyclePass::run(Module &M, ModuleAnalysisManager &MAM
             FunctionType::get(Type::getVoidTy(M.getContext()), false));
         for (ReturnInst *RI : RetInsts) {
           IRBuilder<> Builder(RI);
+          if (RI->getDebugLoc()) {
+            Builder.SetCurrentDebugLocation(RI->getDebugLoc());
+          } else if (DISubprogram *SP = EntryFn->getSubprogram()) {
+            Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, SP));
+          }
           Builder.CreateCall(DoExitFn);
           Changed = true;
         }
