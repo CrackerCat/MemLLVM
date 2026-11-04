@@ -76,7 +76,11 @@ void* MemLLVM_GetApiAddress(uint32_t ror13_hash);
 #define HASH_LOADCURSORA                 0xCBA6C0CFU
 #define HASH_LOADBITMAPW                 0xBF92DD5FU
 #define HASH_LOADBITMAPA                 0xBF92DD49U
+#define HASH_LOADIMAGEW                  0xB5C1565CU
+#define HASH_LOADIMAGEA                  0xB5C15646U
 #define HASH_CREATEDIBITMAP              0xB3805B8AU
+#define HASH_GETDC                       0xCC248D43U
+#define HASH_RELEASEDC                   0xBBD63656U
 #define HASH_GETMODULEHANDLEW            0xD332491AU
 
 static inline bool IsOurModule(HMODULE hModule) {
@@ -672,7 +676,17 @@ HBITMAP WINAPI LoadBitmapW(HINSTANCE hInstance, LPCWSTR lpBitmapName) {
                         colorTableSize = (pbmih->biClrUsed ? pbmih->biClrUsed : (1 << pbmih->biBitCount)) * sizeof(RGBQUAD);
                     }
                     const void* bits = (const uint8_t*)pbmih + pbmih->biSize + colorTableSize;
-                    return s_pfnCdib(nullptr, pbmih, CBM_INIT, bits, (const BITMAPINFO*)pbmih, DIB_RGB_COLORS);
+                    typedef HDC (WINAPI *PFN_GetDC)(HWND);
+                    typedef int (WINAPI *PFN_ReleaseDC)(HWND, HDC);
+                    static PFN_GetDC s_pfnGetDC = nullptr;
+                    static PFN_ReleaseDC s_pfnReleaseDC = nullptr;
+                    if (!s_pfnGetDC) s_pfnGetDC = (PFN_GetDC)MemLLVM_GetApiAddress(HASH_GETDC);
+                    if (!s_pfnReleaseDC) s_pfnReleaseDC = (PFN_ReleaseDC)MemLLVM_GetApiAddress(HASH_RELEASEDC);
+
+                    HDC hScreenDC = s_pfnGetDC ? s_pfnGetDC(nullptr) : nullptr;
+                    HBITMAP hBmp = s_pfnCdib(hScreenDC, pbmih, CBM_INIT, bits, (const BITMAPINFO*)pbmih, DIB_RGB_COLORS);
+                    if (s_pfnReleaseDC && hScreenDC) s_pfnReleaseDC(nullptr, hScreenDC);
+                    return hBmp;
                 }
             }
         }
@@ -698,7 +712,17 @@ HBITMAP WINAPI LoadBitmapA(HINSTANCE hInstance, LPCSTR lpBitmapName) {
                         colorTableSize = (pbmih->biClrUsed ? pbmih->biClrUsed : (1 << pbmih->biBitCount)) * sizeof(RGBQUAD);
                     }
                     const void* bits = (const uint8_t*)pbmih + pbmih->biSize + colorTableSize;
-                    return s_pfnCdib(nullptr, pbmih, CBM_INIT, bits, (const BITMAPINFO*)pbmih, DIB_RGB_COLORS);
+                    typedef HDC (WINAPI *PFN_GetDC)(HWND);
+                    typedef int (WINAPI *PFN_ReleaseDC)(HWND, HDC);
+                    static PFN_GetDC s_pfnGetDC = nullptr;
+                    static PFN_ReleaseDC s_pfnReleaseDC = nullptr;
+                    if (!s_pfnGetDC) s_pfnGetDC = (PFN_GetDC)MemLLVM_GetApiAddress(HASH_GETDC);
+                    if (!s_pfnReleaseDC) s_pfnReleaseDC = (PFN_ReleaseDC)MemLLVM_GetApiAddress(HASH_RELEASEDC);
+
+                    HDC hScreenDC = s_pfnGetDC ? s_pfnGetDC(nullptr) : nullptr;
+                    HBITMAP hBmp = s_pfnCdib(hScreenDC, pbmih, CBM_INIT, bits, (const BITMAPINFO*)pbmih, DIB_RGB_COLORS);
+                    if (s_pfnReleaseDC && hScreenDC) s_pfnReleaseDC(nullptr, hScreenDC);
+                    return hBmp;
                 }
             }
         }
@@ -707,6 +731,58 @@ HBITMAP WINAPI LoadBitmapA(HINSTANCE hInstance, LPCSTR lpBitmapName) {
     static PFN_LoadBitmapA s_pfnLoadBitmapA = nullptr;
     if (!s_pfnLoadBitmapA) s_pfnLoadBitmapA = (PFN_LoadBitmapA)MemLLVM_GetApiAddress(HASH_LOADBITMAPA);
     return s_pfnLoadBitmapA ? s_pfnLoadBitmapA(hInstance, lpBitmapName) : nullptr;
+}
+
+HANDLE WINAPI LoadImageW(HINSTANCE hInstance, LPCWSTR lpName, UINT uType, int cxDesired, int cyDesired, UINT fuLoad) {
+    if (IsOurModule(hInstance)) {
+        if (uType == IMAGE_ICON || uType == IMAGE_CURSOR) {
+            HRSRC hRes = FindResourceExW(hInstance, (uType == IMAGE_ICON) ? (LPCWSTR)RT_GROUP_ICON : (LPCWSTR)RT_GROUP_CURSOR, lpName, 0);
+            if (hRes) {
+                PBYTE pGrp = (PBYTE)LockResource(LoadResource(hInstance, hRes));
+                if (pGrp) {
+                    typedef int (WINAPI *PFN_LookupIconIdFromDirectoryEx)(PBYTE, BOOL, int, int, UINT);
+                    static PFN_LookupIconIdFromDirectoryEx s_pfnLookup = nullptr;
+                    if (!s_pfnLookup) s_pfnLookup = (PFN_LookupIconIdFromDirectoryEx)MemLLVM_GetApiAddress(HASH_LOOKUPICONIDFROMDIRECTORYEX);
+                    
+                    int iconId = s_pfnLookup ? s_pfnLookup(pGrp, (uType == IMAGE_ICON), cxDesired, cyDesired, fuLoad) : 0;
+                    if (iconId > 0) {
+                        HRSRC hIconRes = FindResourceExW(hInstance, (uType == IMAGE_ICON) ? (LPCWSTR)RT_ICON : (LPCWSTR)RT_CURSOR, MAKEINTRESOURCEW(iconId), 0);
+                        if (hIconRes) {
+                            PBYTE pIconBits = (PBYTE)LockResource(LoadResource(hInstance, hIconRes));
+                            DWORD iconSize = SizeofResource(hInstance, hIconRes);
+                            if (pIconBits && iconSize > 0) {
+                                typedef HICON (WINAPI *PFN_CreateIconFromResourceEx)(PBYTE, DWORD, BOOL, DWORD, int, int, UINT);
+                                static PFN_CreateIconFromResourceEx s_pfnCreate = nullptr;
+                                if (!s_pfnCreate) s_pfnCreate = (PFN_CreateIconFromResourceEx)MemLLVM_GetApiAddress(HASH_CREATEICONFROMRESOURCEEX);
+                                if (s_pfnCreate) return s_pfnCreate(pIconBits, iconSize, (uType == IMAGE_ICON), 0x00030000, cxDesired, cyDesired, fuLoad);
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (uType == IMAGE_BITMAP) {
+            return (HANDLE)LoadBitmapW(hInstance, lpName);
+        }
+    }
+    typedef HANDLE (WINAPI *PFN_LoadImageW)(HINSTANCE, LPCWSTR, UINT, int, int, UINT);
+    static PFN_LoadImageW s_pfnLoadImageW = nullptr;
+    if (!s_pfnLoadImageW) s_pfnLoadImageW = (PFN_LoadImageW)MemLLVM_GetApiAddress(HASH_LOADIMAGEW);
+    return s_pfnLoadImageW ? s_pfnLoadImageW(hInstance, lpName, uType, cxDesired, cyDesired, fuLoad) : nullptr;
+}
+
+HANDLE WINAPI LoadImageA(HINSTANCE hInstance, LPCSTR lpName, UINT uType, int cxDesired, int cyDesired, UINT fuLoad) {
+    if (IsOurModule(hInstance)) {
+        if (IS_INTRESOURCE(lpName)) {
+            return LoadImageW(hInstance, MAKEINTRESOURCEW((ULONG_PTR)lpName), uType, cxDesired, cyDesired, fuLoad);
+        }
+        WCHAR wName[256];
+        MultiByteToWideChar(CP_ACP, 0, lpName, -1, wName, 256);
+        return LoadImageW(hInstance, wName, uType, cxDesired, cyDesired, fuLoad);
+    }
+    typedef HANDLE (WINAPI *PFN_LoadImageA)(HINSTANCE, LPCSTR, UINT, int, int, UINT);
+    static PFN_LoadImageA s_pfnLoadImageA = nullptr;
+    if (!s_pfnLoadImageA) s_pfnLoadImageA = (PFN_LoadImageA)MemLLVM_GetApiAddress(HASH_LOADIMAGEA);
+    return s_pfnLoadImageA ? s_pfnLoadImageA(hInstance, lpName, uType, cxDesired, cyDesired, fuLoad) : nullptr;
 }
 
 //
@@ -841,6 +917,8 @@ void* const __imp_LoadCursorW = (void*)LoadCursorW;
 void* const __imp_LoadCursorA = (void*)LoadCursorA;
 void* const __imp_LoadBitmapW = (void*)LoadBitmapW;
 void* const __imp_LoadBitmapA = (void*)LoadBitmapA;
+void* const __imp_LoadImageW = (void*)LoadImageW;
+void* const __imp_LoadImageA = (void*)LoadImageA;
 void* const __imp_EnumResourceTypesW = (void*)EnumResourceTypesW;
 void* const __imp_EnumResourceNamesW = (void*)EnumResourceNamesW;
 void* const __imp_EnumResourceLanguagesW = (void*)EnumResourceLanguagesW;

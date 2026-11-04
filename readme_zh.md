@@ -240,12 +240,14 @@ examples/
 ├── doom/        # 经典 DOOM 3D 游戏引擎（83 个源码文件，纯 CPU 软件光栅化，实时音频流）
 ├── imgui/       # Dear ImGui v1.91+ 工业级 GUI（DirectX 11 硬件加速渲染管线）
 ├── sqlite/      # 官方 SQLite3 命令行终端（完整交互式 REPL、SQL 执行引擎）
+├── winmine/     # 经典 Win32 扫雷（完整 PE 资源树、DialogBoxParam 弹窗、LoadMenu、位图与加速键）
 ├── mimikatz/    # 大规模复杂 C 原生工程（114 个编译单元，复杂结构体与跨模块全局符号）
 └── mock_cli/    # 诊断型交互式 CLI 测试桩（测试标准管道、参数透传与流传输稳定性）
 ```
 
 | 旗舰验证项目 | 语言体系与规模 | 扁平镜像体积 | 实战验证的技术能力与亮点 |
 | :--- | :--- | :--- | :--- |
+| **[经典 Win32 扫雷](examples/winmine/)** | 纯 C / Win32 (ReactOS 移植) | **1.01 MB** | **PE 资源系统终极实战验证**：完整打包 `.rsrc` 节，无 PE 头部直接通过内存三级目录树解析 `DialogBoxParamW`（自定义难度与英雄榜模态弹窗）、`LoadMenuW` 菜单、`LoadBitmapW`（经典笑脸/数字/方块贴图）、`LoadIconW` 图标、`LoadAcceleratorsW` 快捷键与 `LoadStringW` 字符串表。 |
 | **[官方 SQLite3 CLI](examples/sqlite/)** | C / SQLite 3.45 | **340 KB** | 官方完整交互式 SQL 终端，内存中建表、查询、索引构建、表格格式化回显、完全支持标准管道读写与交互式键盘录入。 |
 | **[经典 DOOM 引擎](examples/doom/)** | 纯 C (83 个源码文件) | **703 KB** | 经典 DOOM 3D 引擎纯内存光栅化渲染，实时键盘方向控制，纯软件多声道音频混音流，从伴生 `doom1.wad` 实时流式读取游戏资产。 |
 | **[Dear ImGui v1.91+](examples/imgui/)** | C++17 工业级 UI | **1.70 MB** | 完整即时模式图形界面、多窗口停靠系统（Docking）、图表、样式编辑器，完全通过**硬件加速的 DirectX 11 / DXGI** 管线渲染。 |

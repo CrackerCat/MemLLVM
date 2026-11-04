@@ -278,12 +278,14 @@ examples/
 ├── doom/        # Classic DOOM 3D Game Engine (83 files, software rasterizer, audio)
 ├── imgui/       # Dear ImGui v1.91+ (Hardware-accelerated DirectX 11, multi-windows)
 ├── sqlite/      # Official SQLite3 CLI Shell (Full interactive REPL, SQL engine)
+├── winmine/     # Classic Win32 Minesweeper (Full PE resource tree, DialogBoxParam, LoadMenu, Bitmaps)
 ├── mimikatz/    # Large-scale Complex C Project (114 TUs, tentative definitions, subsystems)
 └── mock_cli/    # Interactive CLI Diagnostic Stub (Testing stdio pipes & arguments)
 ```
 
 | Showcase Project | Scale & Language | Flat Binary Size | Key Validated Capabilities |
 | :--- | :--- | :--- | :--- |
+| **[Classic Win32 Minesweeper](examples/winmine/)** | Pure C / Win32 (ReactOS Port) | **1.01 MB** | **Ultimate Native Resource Subsystem Showcase**: Bundles `.rsrc` directly into flat memory. Seamlessly parses `DialogBoxParamW` (Custom Game & Fastest Times modal dialogs), `LoadMenuW` menus, `LoadBitmapW` (smiley face, LED numbers, mine tiles), `LoadIconW`, `LoadAcceleratorsW`, and `LoadStringW` directly from memory without PE headers. |
 | **[Official SQLite3 CLI](examples/sqlite/)** | C / SQLite 3.45 | **340 KB** | Full interactive SQL REPL, in-memory database creation, complex SQL queries, table formatting, pipe streaming. |
 | **[Classic DOOM Engine](examples/doom/)** | Pure C (83 files) | **703 KB** | Full id Software DOOM engine, 3D software rasterization, keyboard controls, audio mixer, streaming IWAD data. |
 | **[Dear ImGui v1.91+](examples/imgui/)** | C++17 Industrial UI | **1.70 MB** | Full immediate-mode GUI, multi-window docking, plots, widgets, hardware-accelerated **DirectX 11 / DXGI** pipeline. |

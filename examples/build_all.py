@@ -11,7 +11,8 @@ EXAMPLES = [
     ("CHIP-8 Virtual Machine", ["python", os.path.join(SCRIPT_DIR, "chip8", "build_chip8.py")], os.path.join(SCRIPT_DIR, "chip8", "chip8.bin")),
     ("Classic DOOM Game Engine", ["python", os.path.join(SCRIPT_DIR, "doom", "build_doom.py")], os.path.join(SCRIPT_DIR, "doom", "doom.bin")),
     ("Dear ImGui DirectX 11 Demo", ["cmd", "/c", os.path.join(SCRIPT_DIR, "imgui", "build_imgui_demo.bat")], os.path.join(SCRIPT_DIR, "imgui", "imgui_demo.bin")),
-    ("Official SQLite3 CLI Shell", ["python", os.path.join(SCRIPT_DIR, "sqlite", "build_sqlite.py")], os.path.join(SCRIPT_DIR, "sqlite", "sqlite3.bin"))
+    ("Official SQLite3 CLI Shell", ["python", os.path.join(SCRIPT_DIR, "sqlite", "build_sqlite.py")], os.path.join(SCRIPT_DIR, "sqlite", "sqlite3.bin")),
+    ("WinMine Classic Win32 Game", ["python", os.path.join(SCRIPT_DIR, "winmine", "build_winmine.py")], os.path.join(SCRIPT_DIR, "winmine", "winmine.bin"))
 ]
 
 def main():

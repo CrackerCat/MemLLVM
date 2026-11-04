@@ -93,6 +93,7 @@ bool isStaticShimSymbol(StringRef Name) {
       Name == "LoadIconA" || Name == "LoadIconW" ||
       Name == "LoadCursorA" || Name == "LoadCursorW" ||
       Name == "LoadBitmapA" || Name == "LoadBitmapW" ||
+      Name == "LoadImageA" || Name == "LoadImageW" ||
       Name == "_wassert" || Name == "_assert" ||
       Name == "floor" || Name == "ceil" || Name == "round" ||
       Name == "floorf" || Name == "ceilf" ||
