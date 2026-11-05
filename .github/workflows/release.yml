@@ -186,7 +186,7 @@ jobs:
           foreach ($bin in $expected) {
             if (-not (Test-Path $bin)) { throw "Expected binary missing: $bin" }
             $len = (Get-Item $bin).Length
-            Write-Host "[+] Verified $bin: $len bytes"
+            Write-Host ("[+] Verified {0}: {1} bytes" -f $bin, $len)
           }
 
       - name: Stage Examples Flat Binaries
