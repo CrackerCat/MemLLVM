@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 echo =======================================================================
-echo   MemLLVM Full Modern C++ Regression Test Suite (24 Tests)
+echo   MemLLVM Full Modern C++ Regression Test Suite (27 Tests)
 echo =======================================================================
 
 set "TESTS_DIR=%~dp0"
@@ -341,11 +341,45 @@ python "%FLAT_RUN%" %TESTS_DIR%test_format.bin 0
 if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 echo [Test 24 Status: %ERRORLEVEL%]
 
+echo.
+echo [*] Compiling and running Test 25: C++20 Synchronization Primitives (std::atomic wait, semaphore, latch, barrier)...
+"%CLANG_BIN%" %CPP20_FLAGS% -c %TESTS_DIR%test_sync.cpp /Fo:%TESTS_DIR%test_sync.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% %TESTS_DIR%test_sync.obj "%LTL_LIB%" -out:%TESTS_DIR%test_sync.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
+python "%EXTRACT_BIN%" %TESTS_DIR%test_sync.bin %TESTS_DIR%test_sync.exe
+python "%FLAT_RUN%" %TESTS_DIR%test_sync.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
+echo [Test 25 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 26: C++23 Stacktrace (std::stacktrace::current)...
+set CPP23_FLAGS=/std:c++latest "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /Gy /clang:-ffunction-sections /clang:-fdata-sections /clang:-ffreestanding /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" /O1 /clang:-Oz /D_NO_CRT_STDIO_INLINE
+"%CLANG_BIN%" %CPP23_FLAGS% -c %TESTS_DIR%test_stacktrace.cpp /Fo:%TESTS_DIR%test_stacktrace.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% %TESTS_DIR%test_stacktrace.obj "%LTL_LIB%" -out:%TESTS_DIR%test_stacktrace.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
+python "%EXTRACT_BIN%" %TESTS_DIR%test_stacktrace.bin %TESTS_DIR%test_stacktrace.exe
+python "%FLAT_RUN%" %TESTS_DIR%test_stacktrace.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
+echo [Test 26 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 27: Named Locales (std::locale("zh-CN"))...
+"%CLANG_BIN%" %CPP20_FLAGS% -c %TESTS_DIR%test_locale_named.cpp /Fo:%TESTS_DIR%test_locale_named.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% %TESTS_DIR%test_locale_named.obj "%LTL_LIB%" -out:%TESTS_DIR%test_locale_named.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
+python "%EXTRACT_BIN%" %TESTS_DIR%test_locale_named.bin %TESTS_DIR%test_locale_named.exe
+python "%FLAT_RUN%" %TESTS_DIR%test_locale_named.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
+echo [Test 27 Status: %ERRORLEVEL%]
+
 
 
 echo.
 echo =======================================================================
-echo   ALL 24 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
+echo   ALL 27 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
 echo =======================================================================
 del "%TESTS_DIR%*.obj" "%TESTS_DIR%*.exe" "%TESTS_DIR%*.bin" "%TESTS_DIR%*.lib" >nul 2>&1
 endlocal

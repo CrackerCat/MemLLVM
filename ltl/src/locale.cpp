@@ -206,8 +206,12 @@ void __cdecl _Lockit::_Lockit_ctor(_Lockit*, int) noexcept {}
 void __cdecl _Lockit::_Lockit_dtor(_Lockit*) noexcept {}
 
 // 2. _Locinfo Implementation
-void __cdecl _Locinfo::_Locinfo_ctor(_Locinfo*, const char*) {}
-void __cdecl _Locinfo::_Locinfo_ctor(_Locinfo*, int, const char*) {}
+void __cdecl _Locinfo::_Locinfo_ctor(_Locinfo* pLocinfo, const char* locname) {
+    pLocinfo->_Newlocname = (locname && locname[0]) ? locname : "C";
+}
+void __cdecl _Locinfo::_Locinfo_ctor(_Locinfo* pLocinfo, int, const char* locname) {
+    pLocinfo->_Newlocname = (locname && locname[0]) ? locname : "C";
+}
 void __cdecl _Locinfo::_Locinfo_dtor(_Locinfo*) {}
 _Locinfo& __cdecl _Locinfo::_Locinfo_Addcats(_Locinfo* loc, int, const char*) {
     return *loc;
@@ -270,6 +274,52 @@ locale::_Locimp* __cdecl locale::_Init(bool) {
 
 locale::_Locimp* __cdecl locale::_Getgloballocale() {
     return (locale::_Locimp*)MemLLVM_GetClassicLocimp();
+}
+
+// 4.2. Named Locale Creation & Management (_New_Locimp, _Makeloc)
+locale::_Locimp* __cdecl locale::_Locimp::_New_Locimp(bool _Transparent) {
+    return new _Locimp(_Transparent);
+}
+
+locale::_Locimp* __cdecl locale::_Locimp::_New_Locimp(const _Locimp& _Right) {
+    return new _Locimp(_Right);
+}
+
+void __cdecl locale::_Locimp::_Locimp_ctor(locale::_Locimp* _This, const locale::_Locimp& imp) {
+    _This->_Facetvec = nullptr;
+    _This->_Facetcount = imp._Facetcount;
+    _This->_Catmask = imp._Catmask;
+    _This->_Xparent = imp._Xparent;
+    if (0 < _This->_Facetcount && imp._Facetvec) {
+        _This->_Facetvec = static_cast<locale::facet**>(malloc(_This->_Facetcount * sizeof(locale::facet*)));
+        if (_This->_Facetvec) {
+            for (size_t count = _This->_Facetcount; 0 < count;) {
+                locale::facet* ptrfac = imp._Facetvec[--count];
+                if ((_This->_Facetvec[count] = ptrfac) != nullptr) {
+                    ptrfac->_Incref();
+                }
+            }
+        }
+    }
+}
+
+void __cdecl locale::_Locimp::_Locimp_dtor(locale::_Locimp* _This) {
+    for (size_t count = _This->_Facetcount; 0 < count;) {
+        if (_This->_Facetvec && _This->_Facetvec[--count] != nullptr) {
+            delete _This->_Facetvec[count]->_Decref();
+        }
+    }
+    if (_This->_Facetvec) {
+        free(_This->_Facetvec);
+        _This->_Facetvec = nullptr;
+    }
+}
+
+locale::_Locimp* __cdecl locale::_Locimp::_Makeloc(
+    const _Locinfo& _Lobj, category _Cat, _Locimp* _Pimp, const locale*) {
+    _Pimp->_Catmask |= _Cat;
+    _Pimp->_Name = _Lobj._Getname();
+    return _Pimp;
 }
 
 // 5. ios_base cleanups
