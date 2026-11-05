@@ -127,13 +127,13 @@ def main():
         except Exception:
             pass
 
-    # Copy to SCLoader directory for easy access
-    scloader_dst = r"E:\C++project\CUI\SCLoader\sqlite3.bin"
-    try:
-        shutil.copy2(SQLITE_BIN, scloader_dst)
-        print(f"[+] Also copied to {scloader_dst}")
-    except Exception as e:
-        pass
+    # Optionally mirror to external SCLoader development directory if configured
+    scloader_dev = os.environ.get("SCLOADER_DEV_DIR")
+    if scloader_dev and os.path.isdir(scloader_dev):
+        try:
+            shutil.copy2(SQLITE_BIN, os.path.join(scloader_dev, "sqlite3.bin"))
+        except Exception:
+            pass
 
     size_kb = os.path.getsize(SQLITE_BIN) / 1024.0
     print(f"\n[+] SUCCESS: Official SQLite3 CLI built: {SQLITE_BIN} ({size_kb:.2f} KB)")

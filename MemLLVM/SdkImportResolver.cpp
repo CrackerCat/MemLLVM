@@ -207,14 +207,19 @@ public:
     if (Initialized) return;
     Initialized = true;
 
-    // 1. Try external file next to current directory or D:\MemLLVM
+    // 1. Try external file next to current directory or MEMLLVM_DIR
     bool loaded = false;
+    std::string envPath;
+    if (const char *env = getenv("MEMLLVM_DIR")) {
+      envPath = std::string(env) + "\\SdkImportIndex.dat";
+    }
     const char *paths[] = {
       "SdkImportIndex.dat",
       "../SdkImportIndex.dat",
-      "D:\\MemLLVM\\SdkImportIndex.dat"
+      envPath.empty() ? nullptr : envPath.c_str()
     };
     for (const char *p : paths) {
+      if (!p) continue;
       FILE *f = fopen(p, "rb");
       if (f) {
         fseek(f, 0, SEEK_END);

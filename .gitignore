@@ -52,12 +52,23 @@ CMakeUserPresets.json
 *.bin
 *.manifest
 
-# Allow release artifacts and Tools directory to be tracked
+# Allow release artifacts directory to be tracked
 !release_artifacts/
 !release_artifacts/**
+
+# Whitelist production tools in Tools directory
 !Tools/
-!Tools/**
-!Tools/*.exe
+!Tools/*.py
+!Tools/*.c
+!Tools/*.h
+!Tools/*.bat
+!Tools/SCLoader.exe
+!Tools/scloader_cli.exe
+
+# Ignore screenshots, temporary bitmaps, and savegames
+*.bmp
+!examples/winmine/rc/*.bmp
+.savegame/
 
 # Debugging and symbol files
 *.pdb

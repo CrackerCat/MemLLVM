@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import shutil
 import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +35,12 @@ def main():
             size = os.path.getsize(bin_path)
             size_kb = size / 1024.0
             print(f">>> [SUCCESS] {name} built in {elapsed:.2f}s ({size_kb:.2f} KB)")
+            rel_art_dir = os.path.join(REPO_ROOT, "release_artifacts")
+            if os.path.isdir(rel_art_dir):
+                try:
+                    shutil.copy2(bin_path, os.path.join(rel_art_dir, os.path.basename(bin_path)))
+                except Exception:
+                    pass
             results.append((name, True, f"{size_kb:.2f} KB", f"{elapsed:.2f}s", bin_path))
         else:
             print(f">>> [FAILED] {name} failed with returncode {res.returncode}")

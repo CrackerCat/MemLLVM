@@ -123,12 +123,12 @@ def main():
         except Exception as e:
             pass
 
-    scloader_dst = os.path.join(r"E:\C++project\CUI\SCLoader", "mock_cli.bin")
-    try:
-        shutil.copy2(BIN_FILE, scloader_dst)
-        print(f"[+] Synchronized to: {scloader_dst}")
-    except Exception as e:
-        pass
+    scloader_dev = os.environ.get("SCLOADER_DEV_DIR")
+    if scloader_dev and os.path.isdir(scloader_dev):
+        try:
+            shutil.copy2(BIN_FILE, os.path.join(scloader_dev, "mock_cli.bin"))
+        except Exception:
+            pass
 
     return 0
 
