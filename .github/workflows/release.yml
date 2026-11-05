@@ -4,6 +4,7 @@ on:
   push:
     branches: [ "**" ]
     tags: [ "**" ]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,6 +20,7 @@ jobs:
   build-mimikatz:
     name: Build mimikatz Flat Binary
     if: |
+      github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.message, 'release') ||
       contains(github.event.head_commit.message, 'Release') ||
       contains(github.ref, 'release') ||
@@ -120,6 +122,7 @@ jobs:
   build-examples:
     name: Build Flat Binary Examples Suite
     if: |
+      github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.message, 'release') ||
       contains(github.event.head_commit.message, 'Release') ||
       contains(github.ref, 'release') ||
@@ -198,6 +201,7 @@ jobs:
     name: Build & Release Flat Binaries
     needs: [build-mimikatz, build-examples]
     if: |
+      github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.message, 'release') ||
       contains(github.event.head_commit.message, 'Release') ||
       contains(github.ref, 'release') ||
@@ -235,7 +239,8 @@ jobs:
             "release_artifacts/doom.bin",
             "release_artifacts/doom1.wad",
             "release_artifacts/imgui_demo.bin",
-            "Tools/SCLoader.exe"
+            "Tools/SCLoader.exe",
+            "Tools/scloader_cli.exe"
           )
           Write-Host "=========================================================="
           Write-Host "       MemLLVM Release Artifacts Verification Matrix       "
@@ -293,8 +298,11 @@ jobs:
           # 3. LTL runtime
           Copy-Item -Recurse "ltl/*" "$sdk/ltl/" -Force
 
-          # 4. Tools (SCLoader GUI runner and flat binary extractor)
+          # 4. Tools (SCLoader GUI runner, CLI runner, and flat binary extractor)
           Copy-Item "Tools/SCLoader.exe" "$sdk/Tools/" -Force
+          if (Test-Path "Tools/scloader_cli.exe") {
+            Copy-Item "Tools/scloader_cli.exe" "$sdk/Tools/" -Force
+          }
           if (Test-Path "Tools/extract_flat_bin.py") {
             Copy-Item "Tools/extract_flat_bin.py" "$sdk/Tools/" -Force
           }
@@ -312,7 +320,7 @@ jobs:
           Copy-Item "update.bat" "$sdk/" -Force
           Copy-Item "update.ps1" "$sdk/" -Force
 
-          # 6. Examples (all examples included)
+          # 6. Examples (all 8 examples included)
           Copy-Item -Recurse "examples/*" "$sdk/examples/" -Force
 
           # 7. Compress into SDK zip package
@@ -378,7 +386,7 @@ jobs:
             ## MemLLVM Official Release (Full SDK & Binaries)
 
             Compiled with **LLVM/Clang New Pass Manager** and **LTL Freestanding Runtime**.
-            All application targets are standalone, self-relocating flat machine code images (.bin) runnable in memory.
+            All application targets are standalone, self-relocating flat machine code images (.bin) runnable directly in memory.
 
             ### Release Assets:
             - **`MemLLVM-SDK-windows-x64.zip`**: Complete "all-in-one" SDK archive with embedded binary-aligned compiler toolchain:
@@ -388,36 +396,38 @@ jobs:
               - `lib/`: `MemLLVM.lib` import library and `ltl.lib` freestanding runtime
               - `include/`: Pass headers & API definitions
               - `ltl/`: Freestanding C/C++ runtime headers and `ltl.lib`
-              - `Tools/`: `SCLoader.exe` interactive GUI payload runner & debugger
+              - `Tools/`: `SCLoader.exe` interactive GUI payload runner & `scloader_cli.exe` command-line payload runner
               - `src/`: Complete C++ source code of all LLVM passes
-              - `examples/`: Full suite of 8 showcase projects (Box2D, CHIP-8, DOOM, ImGui, SQLite, WinMine, Mock CLI, and Mimikatz with full MemLLVM build configurations)
+              - `examples/`: Full suite of 8 showcase projects (`box2d`, `chip8`, `doom`, `imgui`, `sqlite`, `winmine`, `mock_cli`, and `mimikatz` with complete MemLLVM build configurations)
             - **`clang-plugin-toolchain.zip`**: Standalone download of the hermetic Clang compiler toolchain
             - **`MemLLVM-Tests.zip`**: Representative modern C and C++ test suite containing source `.cpp` files, compiled `.bin` flat binaries, batch verification scripts, and test assets
-            - **`mimikatz_mllvm.bin`**: mimikatz 2.2.0 built **from source on the release runner** through the MemLLVM pass (114 translation units), standalone flat image, interactive mode working under pipe-based loaders
-            - **`sqlite3.bin`**: Official SQLite3 Command Line Shell (CLI) interactive flat binary built **from source on the release runner** through the MemLLVM pass, runnable in memory with full interactive stdio/console and pipe support
-            - **`winmine.bin`**: Classic Win32 Minesweeper flat binary built **from source on the release runner**, fully demonstrating the native PE Resource (`.rsrc`) subsystem (menus, modal dialogs, icons, 16-color palette bitmaps, string tables, accelerators)
             - **`CSLoader-source.zip`**: CUI shellcode loader (CSLoader) **source code only** — not built by CI; build locally with Visual Studio
             - **`Tools/SCLoader.exe`**: Modern CUI-based GUI Shellcode & Payload Loader
+            - **`Tools/scloader_cli.exe`**: Lightweight CLI Shellcode & Payload Runner
             - **`box2d.bin`**: Erin Catto's Box2D 2D Rigid Body Physics Engine Flat Binary
             - **`chip8.bin`**: Full CHIP-8 CPU / Sound Virtual Machine Flat Binary
             - **`doom.bin`**: Classic DOOM Game Engine Flat Binary
             - **`doom1.wad`**: DOOM Shareware Game Data IWAD
             - **`imgui_demo.bin`**: Dear ImGui DirectX 11 Immediate-Mode GUI Flat Binary
-            - **`mock_cli.bin`**: Interactive CLI Diagnostic Stub Flat Binary
+            - **`sqlite3.bin`**: Official SQLite3 Command Line Shell (CLI) interactive flat binary built from source on the release runner, runnable in memory with full interactive stdio/console and pipe support
+            - **`winmine.bin`**: Classic Win32 Minesweeper flat binary built from source on the release runner, fully demonstrating the native PE Resource (`.rsrc`) subsystem (menus, modal dialogs, icons, 16-color palette bitmaps, string tables, accelerators)
+            - **`mock_cli.bin`**: Interactive CLI Diagnostic Stub Flat Binary built from source on the release runner, testing full-duplex stdio pipe redirection and arguments
+            - **`mimikatz_mllvm.bin`**: mimikatz 2.2.0 built **from source on the release runner** through the MemLLVM pass (114 translation units), standalone flat image, interactive mode working under pipe-based loaders
           files: |
             release_artifacts/clang-plugin-toolchain.zip
             MemLLVM-SDK-windows-x64.zip
             MemLLVM-Tests.zip
             CSLoader-source.zip
-            release_artifacts/mimikatz_mllvm.bin
-            release_artifacts/sqlite3.bin
-            release_artifacts/winmine.bin
-            release_artifacts/mock_cli.bin
             Tools/SCLoader.exe
+            Tools/scloader_cli.exe
             release_artifacts/box2d.bin
             release_artifacts/chip8.bin
             release_artifacts/doom.bin
             release_artifacts/doom1.wad
             release_artifacts/imgui_demo.bin
+            release_artifacts/sqlite3.bin
+            release_artifacts/winmine.bin
+            release_artifacts/mock_cli.bin
+            release_artifacts/mimikatz_mllvm.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
