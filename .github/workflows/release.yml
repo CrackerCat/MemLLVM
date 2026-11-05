@@ -301,7 +301,6 @@ jobs:
           New-Item -ItemType Directory -Path "$sdk/ltl" -Force
           New-Item -ItemType Directory -Path "$sdk/Tools" -Force
           New-Item -ItemType Directory -Path "$sdk/src" -Force
-          New-Item -ItemType Directory -Path "$sdk/examples" -Force
           New-Item -ItemType Directory -Path "$sdk/toolchain" -Force
 
           # 0. Embed hermetic plugin-compatible toolchain directly into SDK
@@ -312,6 +311,9 @@ jobs:
           Copy-Item "release_artifacts/MemLLVM.dll" "$sdk/bin/" -Force
           if (Test-Path "ltl/ltl.lib") {
             Copy-Item "ltl/ltl.lib" "$sdk/lib/" -Force
+          }
+          if (Test-Path "ltl/ltl_format.lib") {
+            Copy-Item "ltl/ltl_format.lib" "$sdk/lib/" -Force
           }
           if (Test-Path "build/MemLLVM/Release/MemLLVM.lib") {
             Copy-Item "build/MemLLVM/Release/MemLLVM.lib" "$sdk/lib/" -Force
@@ -348,12 +350,9 @@ jobs:
           Copy-Item "update.bat" "$sdk/" -Force
           Copy-Item "update.ps1" "$sdk/" -Force
 
-          # 6. Examples (all 8 examples included)
-          Copy-Item -Recurse "examples/*" "$sdk/examples/" -Force
-
-          # 7. Compress into SDK zip package
+          # 6. Compress minimal usable SDK into zip package (no heavy examples)
           Compress-Archive -Path "$sdk/*" -DestinationPath "MemLLVM-SDK-windows-x64.zip" -Force
-          Write-Host "[+] Created MemLLVM-SDK-windows-x64.zip ($([math]::Round((Get-Item 'MemLLVM-SDK-windows-x64.zip').Length / 1MB, 2)) MB)"
+          Write-Host "[+] Created minimal MemLLVM-SDK-windows-x64.zip ($([math]::Round((Get-Item 'MemLLVM-SDK-windows-x64.zip').Length / 1MB, 2)) MB)"
 
       - name: Package Tests Distribution Archive
         shell: pwsh
@@ -417,16 +416,15 @@ jobs:
             All application targets are standalone, self-relocating flat machine code images (.bin) runnable directly in memory.
 
             ### Release Assets:
-            - **`MemLLVM-SDK-windows-x64.zip`**: Complete "all-in-one" SDK archive with embedded binary-aligned compiler toolchain:
+            - **`MemLLVM-SDK-windows-x64.zip`**: Minimal self-contained core SDK distribution with embedded binary-aligned compiler toolchain:
               - `setup_env.bat`: One-click environment setup (auto-binds `MEMLLVM_DIR`, sets `LLVMInstallDir` to embedded `toolchain/` for seamless Visual Studio integration, and adds `bin/`, `toolchain/bin/`, and `Tools/` to `PATH`)
               - `toolchain/`: Embedded hermetic Clang compiler (`clang-cl.exe` + builtin headers, LLVM 22.1.8 commit ca7933e4, 100% ABI compatible with `MemLLVM.dll` out of the box)
               - `bin/`: `MemLLVM.dll` LLVM Pass Plugin
-              - `lib/`: `MemLLVM.lib` import library and `ltl.lib` freestanding runtime
+              - `lib/`: `MemLLVM.lib` import library, `ltl.lib` freestanding runtime, and `ltl_format.lib`
               - `include/`: Pass headers & API definitions
-              - `ltl/`: Freestanding C/C++ runtime headers and `ltl.lib`
-              - `Tools/`: `SCLoader.exe` interactive GUI payload runner & `scloader_cli.exe` command-line payload runner
-              - `src/`: Complete C++ source code of all LLVM passes
-              - `examples/`: Full suite of 8 showcase projects (`box2d`, `chip8`, `doom`, `imgui`, `sqlite`, `winmine`, `mock_cli`, and `mimikatz` with complete MemLLVM build configurations)
+              - `ltl/`: Freestanding C/C++ runtime headers and runtime libraries
+              - `Tools/`: `SCLoader.exe` interactive GUI payload runner, `scloader_cli.exe` command-line payload runner, and `extract_flat_bin.py` flat binary extractor
+              - `src/`: Complete C++ source code of LLVM passes
             - **`clang-plugin-toolchain.zip`**: Standalone download of the hermetic Clang compiler toolchain
             - **`MemLLVM-Tests.zip`**: Representative modern C and C++ test suite containing source `.cpp` files, compiled `.bin` flat binaries, batch verification scripts, and test assets
             - **`CSLoader-source.zip`**: CUI shellcode loader (CSLoader) **source code only** — not built by CI; build locally with Visual Studio
