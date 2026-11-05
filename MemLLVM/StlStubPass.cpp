@@ -78,7 +78,8 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
     {"_invalid_parameter_noinfo_noreturn",     0xC000000D},
     {"_purecall",                              0xC0000025},
     {"?_Xregex_error@std@@YAXW4error_type@regex_constants@1@@Z", 0xC0000002},
-    {"?_Xbad_function_call@std@@YAXXZ",        0xC0000003}
+    {"?_Xbad_function_call@std@@YAXXZ",        0xC0000003},
+    {"?_XGetLastError@std@@YAXXZ",             0xC0000001}
   };
 
   for (const auto &s : stubs) {
@@ -279,6 +280,34 @@ PreservedAnalyses StlStubPass::run(Module &M, ModuleAnalysisManager &MAM) {
         GV.setThreadLocal(false);
       }
     }
+  }
+
+  // =========================================================================
+  // 4. std::format & Floating-Point Ryu Tables Auto-Link Detection
+  // Only when format / ryu symbols are actually referenced in this module,
+  // notify the user and inject auto-linking for ltl_format.lib.
+  // When not referenced, do not touch or link format tables.
+  // =========================================================================
+  bool UsesFormatTables = false;
+  for (const GlobalVariable &GV : M.globals()) {
+    if (GV.isDeclaration()) {
+      StringRef Name = GV.getName();
+      if (Name.contains("__POW10_SPLIT") || 
+          Name.contains("__DOUBLE_POW5_") || 
+          Name.contains("_General_precision_tables_2")) {
+        UsesFormatTables = true;
+        break;
+      }
+    }
+  }
+
+  if (UsesFormatTables) {
+    errs() << "[MemLLVM] Detected std::format / floating-point charconv usage: automatically auto-linking Ryu conversion tables (ltl_format.lib)\n";
+    NamedMDNode *DepLibs = M.getOrInsertNamedMetadata("llvm.dependent-libraries");
+    Metadata *LibMD = MDString::get(Ctx, "ltl_format.lib");
+    MDNode *LibNode = MDNode::get(Ctx, LibMD);
+    DepLibs->addOperand(LibNode);
+    Changed = true;
   }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();

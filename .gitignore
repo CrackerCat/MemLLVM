@@ -122,6 +122,7 @@ examples/mimikatz/build/*
 !examples/mimikatz/lib/**
 # static freestanding runtime linked into every payload
 !ltl/ltl.lib
+!ltl/ltl_format.lib
 # inline asm source for CSLoader
 !CSLoader/CallShellcode.asm
 # per-project intermediate dirs (rebuilt from scratch on CI)

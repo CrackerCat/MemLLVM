@@ -94,9 +94,35 @@ if %ERRORLEVEL% neq 0 exit /b 1
 "%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\crt_resources.cpp" /Fo"%LTL_ROOT%\src\crt_resources.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
 
-echo [*] Archiving into ltl.lib...
-"%LIB_BIN%" /out:"%LTL_ROOT%\ltl.lib" "%LTL_ROOT%\src\concurrency.obj" "%LTL_ROOT%\src\emutls.obj" "%LTL_ROOT%\src\filesystem.obj" "%LTL_ROOT%\src\crt_mem.obj" "%LTL_ROOT%\src\crt_exceptions.obj" "%LTL_ROOT%\src\crt_atexit.obj" "%LTL_ROOT%\src\stdio_printf.obj" "%LTL_ROOT%\src\stdio_puts.obj" "%LTL_ROOT%\src\iostream.obj" "%LTL_ROOT%\src\locale.obj" "%LTL_ROOT%\src\regex.obj" "%LTL_ROOT%\src\async.obj" "%LTL_ROOT%\src\crt_resources.obj"
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\random.cpp" /Fo"%LTL_ROOT%\src\random.obj"
 if %ERRORLEVEL% neq 0 exit /b 1
+
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\chrono_tz.cpp" /Fo"%LTL_ROOT%\src\chrono_tz.obj"
+if %ERRORLEVEL% neq 0 exit /b 1
+
+"%CLANG_BIN%" %COMP_FLAGS% "%LTL_ROOT%\src\execution.cpp" /Fo"%LTL_ROOT%\src\execution.obj"
+if %ERRORLEVEL% neq 0 exit /b 1
+
+set TABLE_FLAGS=/c /std:c++20 /O2 /Gy /clang:-ffunction-sections /clang:-fdata-sections /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include"
+"%CLANG_BIN%" %TABLE_FLAGS% "%LTL_ROOT%\src\format_tables.cpp" /Fo"%LTL_ROOT%\src\format_tables.obj"
+if %ERRORLEVEL% neq 0 exit /b 1
+
+echo [*] Archiving into ltl_format.lib (standalone modular ryu lookup tables)...
+"%LIB_BIN%" /out:"%LTL_ROOT%\ltl_format.lib" "%LTL_ROOT%\src\format_tables.obj"
+if %ERRORLEVEL% neq 0 exit /b 1
+
+echo [*] Archiving into ltl.lib...
+"%LIB_BIN%" /out:"%LTL_ROOT%\ltl.lib" "%LTL_ROOT%\src\concurrency.obj" "%LTL_ROOT%\src\emutls.obj" "%LTL_ROOT%\src\filesystem.obj" "%LTL_ROOT%\src\crt_mem.obj" "%LTL_ROOT%\src\crt_exceptions.obj" "%LTL_ROOT%\src\crt_atexit.obj" "%LTL_ROOT%\src\stdio_printf.obj" "%LTL_ROOT%\src\stdio_puts.obj" "%LTL_ROOT%\src\iostream.obj" "%LTL_ROOT%\src\locale.obj" "%LTL_ROOT%\src\regex.obj" "%LTL_ROOT%\src\async.obj" "%LTL_ROOT%\src\crt_resources.obj" "%LTL_ROOT%\src\random.obj" "%LTL_ROOT%\src\chrono_tz.obj" "%LTL_ROOT%\src\execution.obj" "%LTL_ROOT%\src\format_tables.obj"
+if %ERRORLEVEL% neq 0 exit /b 1
+
+if exist "%LTL_ROOT%\..\..\MemLLVM-SDK-windows-x64\lib" (
+    copy /y "%LTL_ROOT%\ltl.lib" "%LTL_ROOT%\..\..\MemLLVM-SDK-windows-x64\lib\ltl.lib" >nul
+    copy /y "%LTL_ROOT%\ltl_format.lib" "%LTL_ROOT%\..\..\MemLLVM-SDK-windows-x64\lib\ltl_format.lib" >nul
+)
+if exist "D:\MemLLVM-SDK-windows-x64\lib" (
+    copy /y "%LTL_ROOT%\ltl.lib" "D:\MemLLVM-SDK-windows-x64\lib\ltl.lib" >nul
+    copy /y "%LTL_ROOT%\ltl_format.lib" "D:\MemLLVM-SDK-windows-x64\lib\ltl_format.lib" >nul
+)
 
 del "%LTL_ROOT%\src\*.obj" >nul 2>&1
 

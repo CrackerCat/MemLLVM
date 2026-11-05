@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 echo =======================================================================
-echo   MemLLVM Full Modern C++ Regression Test Suite (20 Tests)
+echo   MemLLVM Full Modern C++ Regression Test Suite (24 Tests)
 echo =======================================================================
 
 set "TESTS_DIR=%~dp0"
@@ -296,10 +296,56 @@ if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
 
 echo [Test 20 Status: %ERRORLEVEL%]
 
+echo.
+echo [*] Compiling and running Test 21: Hardware Entropy (std::random_device)...
+set CPP20_FLAGS=/std:c++20 "/clang:-fpass-plugin=%PLUGIN_DLL%" /GS- /GR- /Gy /clang:-ffunction-sections /clang:-fdata-sections /clang:-ffreestanding /clang:-fno-builtin /clang:-fno-jump-tables /clang:-fno-exceptions /clang:-fno-rtti /D_HAS_EXCEPTIONS=0 -I"%LTL_INC%" /O1 /clang:-Oz /D_NO_CRT_STDIO_INLINE
+"%CLANG_BIN%" %CPP20_FLAGS% -c %TESTS_DIR%test_random.cpp /Fo:%TESTS_DIR%test_random.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% %TESTS_DIR%test_random.obj "%LTL_LIB%" -out:%TESTS_DIR%test_random.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
+python "%EXTRACT_BIN%" %TESTS_DIR%test_random.bin %TESTS_DIR%test_random.exe
+python "%FLAT_RUN%" %TESTS_DIR%test_random.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
+echo [Test 21 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 22: C++20 Chrono Timezone Database (std::chrono::current_zone)...
+"%CLANG_BIN%" %CPP20_FLAGS% -c %TESTS_DIR%test_tz.cpp /Fo:%TESTS_DIR%test_tz.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% %TESTS_DIR%test_tz.obj "%LTL_LIB%" -out:%TESTS_DIR%test_tz.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
+python "%EXTRACT_BIN%" %TESTS_DIR%test_tz.bin %TESTS_DIR%test_tz.exe
+python "%FLAT_RUN%" %TESTS_DIR%test_tz.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
+echo [Test 22 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 23: C++17 Parallel Algorithms (std::execution::par)...
+"%CLANG_BIN%" %CPP20_FLAGS% -c %TESTS_DIR%test_execution.cpp /Fo:%TESTS_DIR%test_execution.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% %TESTS_DIR%test_execution.obj "%LTL_LIB%" -out:%TESTS_DIR%test_execution.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
+python "%EXTRACT_BIN%" %TESTS_DIR%test_execution.bin %TESTS_DIR%test_execution.exe
+python "%FLAT_RUN%" %TESTS_DIR%test_execution.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
+echo [Test 23 Status: %ERRORLEVEL%]
+
+echo.
+echo [*] Compiling and running Test 24: C++20 Format and Floating-Point Charconv (std::format auto-link)...
+"%CLANG_BIN%" %CPP20_FLAGS% -c %TESTS_DIR%test_format.cpp /Fo:%TESTS_DIR%test_format.obj
+if %ERRORLEVEL% neq 0 ( echo [-] Compilation failed! & exit /b 1 )
+"%LLD_BIN%" %LINK_FLAGS% %TESTS_DIR%test_format.obj "%LTL_LIB%" -out:%TESTS_DIR%test_format.exe
+if %ERRORLEVEL% neq 0 ( echo [-] Link failed! & exit /b 1 )
+python "%EXTRACT_BIN%" %TESTS_DIR%test_format.bin %TESTS_DIR%test_format.exe
+python "%FLAT_RUN%" %TESTS_DIR%test_format.bin 0
+if %ERRORLEVEL% neq 0 ( echo [-] Flat binary execution failed! & exit /b 1 )
+echo [Test 24 Status: %ERRORLEVEL%]
+
+
 
 echo.
 echo =======================================================================
-echo   ALL 20 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
+echo   ALL 24 MODERN C++ TESTS VERIFIED AND PASSED SUCCESSFULLY!
 echo =======================================================================
 del "%TESTS_DIR%*.obj" "%TESTS_DIR%*.exe" "%TESTS_DIR%*.bin" "%TESTS_DIR%*.lib" >nul 2>&1
 endlocal
