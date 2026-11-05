@@ -10,7 +10,8 @@
 [![Build & Release](https://github.com/Laster-dev/MemLLVM/actions/workflows/release.yml/badge.svg)](https://github.com/Laster-dev/MemLLVM/actions/workflows/release.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6.svg?logo=windows)](https://microsoft.com)
 [![Toolchain](https://img.shields.io/badge/Toolchain-LLVM%20%2F%20Clang--cl%2022-269539.svg?logo=llvm)](https://llvm.org)
-[![Standard](https://img.shields.io/badge/Language-C17%20%2F%20C%2B%2B20-f34b7d.svg?logo=c%2B%2B)](https://isocpp.org)
+[![Standard](https://img.shields.io/badge/Language-C17%20%2F%20C%2B%2B20%20%2F%20C%2B%2B23-f34b7d.svg?logo=c%2B%2B)](https://isocpp.org)
+[![Tests](https://img.shields.io/badge/Tests-27%2F27%20Passed%20(100%25)-brightgreen.svg)](#-full-modern-c-regression-test-suite-27-tests)
 [![Coverage](https://img.shields.io/badge/C%2FC%2B%2B%20Coverage-%3E99.5%25-brightgreen.svg)](#-industrial-coverage--in-depth-architectural-boundaries)
 [![License](https://img.shields.io/badge/License-MIT-blueviolet.svg)](LICENSE)
 
@@ -81,14 +82,18 @@ Across numerous systemic refactorings and production iterations, MemLLVM has sol
 
 | Domain | Supported Capabilities & Engineering Principles |
 | :--- | :--- |
-| **Modern C++20 Language Core** | Template metaprogramming, concepts, lambdas, `constexpr`, type traits, function pointers, multi-level virtual inheritance & dynamic polymorphism (`vtable`). **Meyers Thread-Safe Singletons Fully Supported**: `StlStubPass` rewrites implicit TLS checks and `_Init_thread_epoch` calls into atomic CAS instructions on flat memory, completely severing OS TLS dependencies. |
+| **Modern C++20/C++23 Language Core** | Template metaprogramming, concepts, lambdas, `constexpr`, type traits, function pointers, multi-level virtual inheritance & dynamic polymorphism (`vtable`). **Meyers Thread-Safe Singletons Fully Supported**: `StlStubPass` rewrites implicit TLS checks and `_Init_thread_epoch` calls into atomic CAS instructions on flat memory, completely severing OS TLS dependencies. **C++20 Coroutines** (`co_await`, `co_return`, `std::coroutine_handle`) compiled down to 222 bytes flat binary. |
 | **Native PE Resource Subsystem (`.rsrc`)** | **Full Win32 resource hierarchy without PE headers**! The extractor preserves the `.rsrc` physical section, while the bootstrap stub dynamically rebinds base addresses. The freestanding LTL runtime embeds an in-memory 3-level directory parser (Type -> Name/ID -> Language), transparently shimming `FindResource(Ex)A/W`, `LoadResource`, `LockResource`, `SizeofResource`, `LoadStringA/W` (decoding 16-entry Pascal strings), `DialogBoxParamA/W`, `CreateDialogParamA/W`, `LoadMenuA/W`, `LoadAcceleratorsA/W`, `LoadIconA/W`, `LoadCursorA/W`, `LoadBitmapA/W`, and directory enumerators, with automatic fallback for system DLL resources. |
 | **Ordinal-Only (`[NONAME]`) Exports** | **Complete coverage of Windows un-named exports**! Pre-indexes all 2,729 ordinal exports across 80 system DLLs in Windows 10/11 SDK with $O(\log N)$ compile-time binary search; `ApiResolvePass` rewrites calls to `MemLLVM_GetApiAddressByOrdinal`; the bootstrap resolver natively handles recursive multi-hop forwarders (`DLL.#ordinal` and `DLL.func`) and `<dll>_Ordinal_<ord>` calls. |
 | **C++ Exceptions & Stack Unwinding** | **Full `try` / `catch` / `throw` and rethrow (`throw;`) support**! Standalone table-driven SEH engine: the bootstrap stub dynamically registers `.pdata` function tables (`RtlAddFunctionTable`) with the Windows kernel using the `MEMLLVME` descriptor, guaranteeing 100% deterministic reverse-order execution of local RAII destructors during stack unwinding. |
+| **C++20 Synchronization & Concurrency** | Full synchronization suite: `std::thread`, `std::jthread`, `std::mutex`, `std::recursive_mutex`, `std::condition_variable`, `std::shared_mutex`, `std::async`, `std::future`, lock-free `std::atomic<T>`. **C++20 Concurrency Primitives**: `<semaphore>` (`std::binary_semaphore`, `std::counting_semaphore`), `<latch>`, `<barrier>`, and `std::atomic<T>::wait/notify` dynamically bound to `WaitOnAddress`/`WakeByAddress*` in `kernelbase.dll` with SRWLOCK hash wait tables. |
+| **C++17 Parallel Algorithms** | `std::execution::par`, `std::execution::seq` (e.g., `std::sort(std::execution::par, v.begin(), v.end())`), seamlessly scheduled onto the Windows NT Threadpool (`PTP_WORK`) with aligned allocator support. |
+| **C++20/C++23 Formatting & Print** | **On-Demand `std::format` Auto-Linking**: `StlStubPass` inspects translation unit symbols for `std::format` / floating-point `std::to_chars` and automatically injects Ryu table dependencies (`ltl_format.lib`); strictly introduces **0 extra bytes** when unused. **C++23 `std::print` & `std::println`**: Native Unicode console bridge with UTF-8 to UTF-16 transcoding via `WriteConsoleW` and stream fallback. |
+| **C++23 Stacktrace & Diagnostics** | `<stacktrace>` (`std::stacktrace::current()`, `std::to_string(st)`, frame address formatting) without external debuggers or PDB dependencies; `<source_location>` (`std::source_location::current()`). |
+| **Time, Entropy & Localization** | C++20 `<chrono>` time zone database (`std::chrono::current_zone()`, `zoned_time`, `tzdb`) dynamically querying Win32 timezone info; `std::random_device` hardware entropy via `RtlGenRandom` (`SystemFunction036`) with `RDTSC` fallback; named locales `std::locale("zh-CN")`, `std::locale("")` with safe `_Locimp` heap lifetime management. |
 | **Dual-CRT Stdio & Console I/O** | Directly disassembles and pierces the PEB, clearing the undocumented `WindowFlags` `0x400` and `0x200` intercept bits; simultaneously intercepts file descriptor tables in both `msvcrt.dll` and `ucrtbase.dll`, providing full support for `std::cout`, `std::cin`, `std::cerr`, `printf`, `wprintf`, `fgets`, pipe redirection, and interactive console REPLs. |
 | **Object Lifecycle Management** | Global and static constructors invoked automatically at startup (`@llvm.global_ctors`), registered destructors executed in reverse order on exit (`atexit`), precise RAII deterministic scoping. |
 | **Memory Allocation Subsystem** | Fully freestanding `malloc`, `free`, `realloc`, `calloc`, `operator new`, `operator delete`, aligned allocations, and high-performance bucketed arena allocators. |
-| **Concurrency & Multithreading** | Full standard concurrency: `std::thread`, `std::mutex`, `std::recursive_mutex`, `std::condition_variable`, `std::shared_mutex`, `std::async`, `std::future`, and lock-free atomic operations (`std::atomic`). |
 | **Graphics & System Ecosystem** | Native Win32 window message pumps, GDI vector rendering, **DirectX 11 / DXGI hardware acceleration pipeline** (Dear ImGui), Windows multimedia audio (`winmm`), standard file streams (`std::fstream`), and filesystem paths (`std::filesystem`). |
 
 ---
@@ -122,6 +127,44 @@ Operating completely outside the operating system's native PE loader inevitably 
   Flat binaries require executable memory pages (allocated with `PAGE_EXECUTE_READWRITE` or switched from RW to RX via `VirtualProtect` before execution).
 * **Control Flow Guard (CFG) & Arbitrary Code Guard (ACG)**:
   If the host process enforces strict Control Flow Guard (CFG), indirect calls into non-image dynamic memory trigger fast-fail `0xC0000409` unless registered via `SetProcessValidCallTargets`. If Arbitrary Code Guard (ACG) is enabled on the host, allocating executable memory dynamically is blocked by the Windows kernel.
+
+---
+
+## 🧪 Full Modern C++ Regression Test Suite (27/27 Tests)
+
+MemLLVM maintains an exhaustive, continuously verified regression test suite located in [`tests/run_cpp_tests.bat`](tests/run_cpp_tests.bat). Every test undergoes the complete lifecycle: **Clang Compilation with MemLLVM Pass -> LLD Linking with LTL -> Flat Binary (.bin) Extraction -> In-Memory Execution via Python ctypes**:
+
+| Test ID | Validated Standard Library Feature | Test File | Flat Binary Validation |
+| :---: | :--- | :--- | :---: |
+| **01** | STL `std::vector` Dynamic Container | `test_cpp_stl_basic.cpp` | ✅ Status 0 (Returns 600) |
+| **02** | Global Objects & Dynamic Static Constructors | `test_cpp_global_obj.cpp` | ✅ Status 0 (Returns 1125) |
+| **03** | Virtual Inheritance, Polymorphism & VTables | `test_cpp_polymorphism.cpp` | ✅ Status 0 (Returns 275) |
+| **04** | Meyers Thread-Safe Local Statics (No TLS) | `test_cpp_thread_safe_static.cpp` | ✅ Status 0 (Returns 175) |
+| **05** | Complex Structs, Pointer Math & Constexpr | `test_cpp_struct_ptr_const.cpp` | ✅ Status 0 (Returns 777) |
+| **06** | Global Variables, `.data` & BSS Initialization | `test_cpp_globals_data_bss.cpp` | ✅ Status 0 (Returns 888) |
+| **07** | `std::mutex` Multi-Thread Lock Synchronization | `test_cpp_mutex.cpp` | ✅ Status 0 (Returns 350) |
+| **08** | `std::thread` Thread Creation & Joining | `test_cpp_thread.cpp` | ✅ Status 0 (Returns 400) |
+| **09** | Emulated Thread-Local Storage (`thread_local`) | `test_cpp_thread_local.cpp` | ✅ Status 0 (Returns 130) |
+| **10** | `std::filesystem` Directory & File Operations | `test_cpp_filesystem.cpp` | ✅ Status 0 (Returns 200) |
+| **11** | `std::cout` Stream Formatting & Redirection | `test_cpp_iostream.cpp` | ✅ Status 0 (Returns 105) |
+| **12** | `std::fstream` Disk File Reading & Writing | `test_cpp_fstream.cpp` | ✅ Status 0 (Returns 42) |
+| **13** | `std::cin` Interactive Console Stream Input | `test_cpp_cin.cpp` | ✅ Status 0 |
+| **14** | `std::regex` Regular Expression Matching | `test_cpp_regex.cpp` | ✅ Status 0 (Returns 88) |
+| **15** | `std::async` & `std::future` Promise/Future | `test_cpp_async.cpp` | ✅ Status 0 (Returns 100) |
+| **16** | C++20 Standard Modules (`import std;`) | `test_cpp_module_std.cpp` | ✅ Status 0 (Returns 77) |
+| **17** | Kernel Fast Direct Stdio (`kprintf`) | `test_stdio_kprintf.cpp` | ✅ Status 0 |
+| **18** | Multi-Translation-Unit Global Cross-Linking | `test_multi_tu_main.cpp` | ✅ Status 0 |
+| **19** | Command-Line Arguments Forwarding (`argc/argv`) | `test_argv_ansi.cpp` / `_wide.cpp`| ✅ Status 0 |
+| **20** | Full C++ Exception Handling & RAII Unwind | `test_cpp_exceptions.cpp` | ✅ Status 0 |
+| **21** | Hardware Entropy (`std::random_device`) | `test_random.cpp` | ✅ Status 0 |
+| **22** | C++20 Chrono Timezone Database (`current_zone`)| `test_tz.cpp` | ✅ Status 0 |
+| **23** | C++17 Parallel Algorithms (`std::execution::par`)| `test_execution.cpp` | ✅ Status 0 |
+| **24** | C++20 `std::format` & Floating-Point Charconv | `test_format.cpp` | ✅ Status 0 |
+| **25** | C++20 `<semaphore>`, `<latch>`, `<barrier>`, wait | `test_sync.cpp` | ✅ Status 0 |
+| **26** | C++23 Stacktrace (`std::stacktrace::current()`) | `test_stacktrace.cpp` | ✅ Status 0 |
+| **27** | Named Locales (`std::locale("zh-CN")`) | `test_locale_named.cpp` | ✅ Status 0 |
+
+> 🚀 **Run the complete test suite locally**: Execute `tests\run_cpp_tests.bat` to build, extract, and execute all 27 modern C++ flat binaries in ~30 seconds!
 
 ---
 

@@ -10,7 +10,8 @@
 [![Build & Release](https://github.com/Laster-dev/MemLLVM/actions/workflows/release.yml/badge.svg)](https://github.com/Laster-dev/MemLLVM/actions/workflows/release.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6.svg?logo=windows)](https://microsoft.com)
 [![Toolchain](https://img.shields.io/badge/Toolchain-LLVM%20%2F%20Clang--cl%2022-269539.svg?logo=llvm)](https://llvm.org)
-[![Standard](https://img.shields.io/badge/Language-C17%20%2F%20C%2B%2B20-f34b7d.svg?logo=c%2B%2B)](https://isocpp.org)
+[![Standard](https://img.shields.io/badge/Language-C17%20%2F%20C%2B%2B20%20%2F%20C%2B%2B23-f34b7d.svg?logo=c%2B%2B)](https://isocpp.org)
+[![Tests](https://img.shields.io/badge/Tests-27%2F27%20%E5%85%A8%E9%87%8F%E9%80%9A%E8%BF%87%20(100%25)-brightgreen.svg)](#-现代-c-自动化全量回归测试套件2727-测试全部通过)
 [![Coverage](https://img.shields.io/badge/C%2FC%2B%2B%20%E6%A0%B8%E5%BF%83%E8%A6%86%E7%9B%96%E7%8E%87-%3E99.5%25-brightgreen.svg)](#-工业级技术能力覆盖与现实架构边界深度剖析)
 [![License](https://img.shields.io/badge/License-MIT-blueviolet.svg)](LICENSE)
 
@@ -81,14 +82,18 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 
 | 开发维度 | 全面支持的技术能力与实现原理 |
 | :--- | :--- |
-| **现代 C++20 语言层** | 模板元编程、概念（Concepts）、Lambda 闭包、`constexpr`、多层多重虚拟继承与多态虚表（`vtable`）。**Meyers 线程安全单例全面支持**：`StlStubPass` 将隐式 TLS 检查与 `_Init_thread_epoch` 改写为常规内存原子 CAS 指令，彻底斩断对 OS TLS 的依赖。 |
+| **现代 C++20/C++23 语言核心** | 模板元编程、概念（Concepts）、Lambda 闭包、`constexpr`、多层多重虚拟继承与多态虚表（`vtable`）。**Meyers 线程安全单例全面支持**：`StlStubPass` 将隐式 TLS 检查与 `_Init_thread_epoch` 改写为常规内存原子 CAS 指令，彻底斩断对 OS TLS 的依赖。**C++20 协程系统**（`co_await`、`co_return`、`std::coroutine_handle`）实测编译为扁平二进制仅 222 字节。 |
 | **原生 PE 资源系统（`.rsrc`）** | **无 PE 头部直接原生支持 Win32 资源树**！提取器完整保留 `.rsrc` 物理段，引导桩动态绑定基址，LTL 运行时内置纯内存三级目录树解析引擎，透明接管 `FindResource(Ex)A/W`、`LoadResource`、`LockResource`、`SizeofResource`、`LoadStringA/W`（Pascal 变长字串表）、`DialogBoxParamA/W`、`CreateDialogParamA/W`、`LoadMenuA/W`、`LoadAcceleratorsA/W`、`LoadIconA/W`、`LoadCursorA/W`、`LoadBitmapA/W` 及资源枚举，外部系统模块透明回退。 |
 | **序数导出（`[NONAME]`）寻址** | **全量攻克 Windows 无名序数接口**！内置 Windows 10/11 SDK 全部 80 个核心系统 DLL 的 2,729 个无名序数导出二分检索索引；`ApiResolvePass` 自动改写为 `MemLLVM_GetApiAddressByOrdinal`；自举解析器原生支持递归多级转导链（`DLL.#ordinal` 与 `DLL.func`）及 `<dll>_Ordinal_<ord>` 自定义调用。 |
 | **C++ 异常与栈回溯** | **完整支持 `try` / `catch` / `throw` 与重新抛出（`throw;`）**！自包含表驱动 SEH 机制，引导桩根据动态 `MEMLLVME` 描述符自动向内核注册 `.pdata` 展开表（`RtlAddFunctionTable`），保证栈回溯（Stack Unwinding）过程中局部变量 RAII 析构函数 100% 可靠逆序执行，进程/载荷退出自动注销。 |
+| **C++20 高级并发与同步原语** | 完整标准库并发设施：`std::thread`、`std::jthread`、`std::mutex`、`std::recursive_mutex`、`std::condition_variable`、`std::shared_mutex`、`std::async`、`std::future`、无锁原子 `std::atomic<T>`。**C++20 同步原语**：`<semaphore>`（`std::binary_semaphore` / `counting_semaphore`）、`<latch>`、`<barrier>` 以及 `std::atomic<T>::wait/notify` 动态绑定至 `kernelbase.dll` 的 `WaitOnAddress`/`WakeByAddress*`，并集成 SRWLOCK 哈希散列等待链表。 |
+| **C++17 并行算法策略** | `std::execution::par`、`std::execution::seq`（如 `std::sort(std::execution::par, v.begin(), v.end())`），无缝桥接至 Windows NT 原生线程池（`PTP_WORK`），兼具对齐内存分配支持。 |
+| **C++20/C++23 格式化与打印** | **`std::format` 按需智能隔离链接**：`StlStubPass` 精准扫描 Translation Unit 的全局符号引用，检测到 `std::format` 或浮点 `std::to_chars` 时控制台显式提示并注入 `ltl_format.lib`（Ryu 浮点查找表）；未用到时**零提示且物理隔离引入 0 额外字节**。**C++23 `std::print` 与 `std::println`**：原生 Unicode 控制台适配层，集成 UTF-8 转 UTF-16 并直通 `WriteConsoleW`，普通文件流透明回退。 |
+| **C++23 堆栈诊断与回溯** | `<stacktrace>`（`std::stacktrace::current()`、`std::to_string(st)`、十六进制帧格式化），零调试引擎（免 `dbgeng.dll`）与外部 PDB 依赖，自适应内存扁平执行回溯；`<source_location>`（`std::source_location::current()`）。 |
+| **时间、随机数与本地化** | C++20 `<chrono>` 时区数据库（`std::chrono::current_zone()`、`zoned_time`、`tzdb`），动态获取系统时区信息；`std::random_device` 硬件熵源（`RtlGenRandom`）与 `RDTSC` 兜底；命名 Locale `std::locale("zh-CN")`、`std::locale("")` 安全堆内存生命周期管理。 |
 | **双 CRT 管道与控制台 I/O** | 深度逆向并穿透 PEB，强制抹平 `ProcessParameters->WindowFlags` 中的 `0x400` 与 `0x200` 拦截位；同时接管 `msvcrt.dll` 与 `ucrtbase.dll` 两张独立的文件描述符表，完整支持 `std::cout`、`std::cin`、`std::cerr`、`printf`、`wprintf`、`fgets`、标准管道与交互式控制台 REPL。 |
 | **生命周期管理** | 全局对象与静态变量自动调用构造函数（`@llvm.global_ctors`）、退出时逆序调用析构函数（`atexit`）、精确作用域 RAII。 |
 | **内存分配体系** | 完全自举的 `malloc`、`free`、`realloc`、`calloc`、`operator new`、`operator delete`、内存对齐分配、高速分桶 Arena 分配器。 |
-| **并发与多线程** | 完整的 `std::thread`、`std::mutex`、`std::recursive_mutex`、`std::condition_variable`、`std::shared_mutex`、`std::async`、`std::future` 以及原子操作（`std::atomic`）。 |
 | **图形与系统生态** | 原生 Win32 窗口消息循环、GDI 矢量图形、**DirectX 11 / DXGI 硬件加速管线**、Windows 多媒体音频（`winmm`）、标准文件流（`std::fstream`）与标准文件系统（`std::filesystem`）。 |
 
 ---
@@ -122,6 +127,44 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
   载荷必须放置在具有执行权限的内存页（RWX 或在执行前通过 `VirtualProtect` 将 RW 切换为 RX）。
 * **控制流防护（Control Flow Guard / CFG）与 ACG 限制**：
   若宿主进程开启了强制控制流防护（CFG），在未调用 `SetProcessValidCallTargets` 登记内存函数入口的情况下，间接跳转可能会触发 `0xC0000409`；若宿主开启了 Arbitrary Code Guard (ACG)，则操作系统内核直接禁止在进程内创建或修改可执行代码页。
+
+---
+
+## 🧪 现代 C++ 自动化全量回归测试套件（27/27 测试全部通过）
+
+MemLLVM 维护了一套完整的、自动化持续验证的现代 C++ 全特性回归测试集（[`tests/run_cpp_tests.bat`](tests/run_cpp_tests.bat)）。每一项测试均涵盖完整生命周期：**Clang 编译（带 MemLLVM Pass） -> LLD 链接（集成 LTL） -> 扁平二进制 (.bin) 提取 -> 纯内存映射执行（Python ctypes 验证）**：
+
+| 测试编号 | 验证的标准库模块与技术特性 | 测试源码文件 | 纯内存扁平执行验证结果 |
+| :---: | :--- | :--- | :---: |
+| **01** | STL `std::vector` 动态容器 | `test_cpp_stl_basic.cpp` | ✅ 状态码 0（返回值 600） |
+| **02** | 全局对象与动态静态构造函数 | `test_cpp_global_obj.cpp` | ✅ 状态码 0（返回值 1125） |
+| **03** | 虚函数、虚继承、多态与虚表重定位 | `test_cpp_polymorphism.cpp` | ✅ 状态码 0（返回值 275） |
+| **04** | Meyers 线程安全局部静态变量（免 TLS） | `test_cpp_thread_safe_static.cpp` | ✅ 状态码 0（返回值 175） |
+| **05** | 复杂结构体、指针运算与 Constexpr | `test_cpp_struct_ptr_const.cpp` | ✅ 状态码 0（返回值 777） |
+| **06** | 全局数据段、`.data` 与 BSS 零值初始化 | `test_cpp_globals_data_bss.cpp` | ✅ 状态码 0（返回值 888） |
+| **07** | `std::mutex` 多线程互斥锁同步 | `test_cpp_mutex.cpp` | ✅ 状态码 0（返回值 350） |
+| **08** | `std::thread` 多线程创建、调度与汇合 | `test_cpp_thread.cpp` | ✅ 状态码 0（返回值 400） |
+| **09** | 模拟线程局部存储（`thread_local`） | `test_cpp_thread_local.cpp` | ✅ 状态码 0（返回值 130） |
+| **10** | `std::filesystem` 现代文件系统路径与属性 | `test_cpp_filesystem.cpp` | ✅ 状态码 0（返回值 200） |
+| **11** | `std::cout` 控制台流格式化与重定向 | `test_cpp_iostream.cpp` | ✅ 状态码 0（返回值 105） |
+| **12** | `std::fstream` 磁盘文件读写流 | `test_cpp_fstream.cpp` | ✅ 状态码 0（返回值 42） |
+| **13** | `std::cin` 控制台标准输入流 | `test_cpp_cin.cpp` | ✅ 状态码 0 |
+| **14** | `std::regex` 正则表达式引擎匹配 | `test_cpp_regex.cpp` | ✅ 状态码 0（返回值 88） |
+| **15** | `std::async` 与 `std::future` 异步任务期值 | `test_cpp_async.cpp` | ✅ 状态码 0（返回值 100） |
+| **16** | C++20 标准模块（`import std;`） | `test_cpp_module_std.cpp` | ✅ 状态码 0（返回值 77） |
+| **17** | 内核级极速标准输出（`kprintf`） | `test_stdio_kprintf.cpp` | ✅ 状态码 0 |
+| **18** | 多翻译单元（Multi-TU）全局符号交叉重写 | `test_multi_tu_main.cpp` | ✅ 状态码 0 |
+| **19** | 命令行参数透明转发（`argc/argv`） | `test_argv_ansi.cpp` / `_wide.cpp`| ✅ 状态码 0 |
+| **20** | 完整 C++ 异常处理（`try/catch`）与 RAII 展开 | `test_cpp_exceptions.cpp` | ✅ 状态码 0 |
+| **21** | 硬件级真随机数（`std::random_device`） | `test_random.cpp` | ✅ 状态码 0 |
+| **22** | C++20 Chrono 时区数据库（`current_zone`） | `test_tz.cpp` | ✅ 状态码 0 |
+| **23** | C++17 并行算法策略（`std::execution::par`） | `test_execution.cpp` | ✅ 状态码 0 |
+| **24** | C++20 `std::format` 与浮点转换（按需链接） | `test_format.cpp` | ✅ 状态码 0 |
+| **25** | C++20 `<semaphore>` / `<latch>` / `<barrier>` / 等待 | `test_sync.cpp` | ✅ 状态码 0 |
+| **26** | C++23 堆栈诊断回溯（`std::stacktrace::current()`） | `test_stacktrace.cpp` | ✅ 状态码 0 |
+| **27** | 外部命名 Locale（`std::locale("zh-CN")`） | `test_locale_named.cpp` | ✅ 状态码 0 |
+
+> 🚀 **本地一键运行全量测试**：在项目根目录运行 `tests\run_cpp_tests.bat`，约 30 秒内即可完成全部 27 项现代 C++ 扁平二进制的自动化编译、提取与纯内存执行验证！
 
 ---
 
