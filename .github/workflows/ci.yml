@@ -36,6 +36,11 @@ jobs:
           Copy-Item "release_artifacts/MemLLVM.dll" "bin/MemLLVM.dll" -Force
           Write-Host "[+] Staged bin/MemLLVM.dll ($((Get-Item 'bin/MemLLVM.dll').Length) bytes)"
 
+      - name: Install Python Build Dependencies
+        shell: pwsh
+        run: |
+          pip install --upgrade pefile
+
       - name: Build All Flat Binary Examples (Batch Suite)
         shell: pwsh
         run: |

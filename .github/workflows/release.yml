@@ -108,11 +108,17 @@ jobs:
           Write-Host "[+] mimikatz_mllvm.bin: $size bytes"
           if ($size -lt 1MB) { throw "Flat binary suspiciously small ($size bytes)" }
 
+      - name: Stage mimikatz Flat Binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "release_artifacts" -Force | Out-Null
+          Copy-Item "examples/mimikatz/x64/mimikatz_mllvm.bin" "release_artifacts/mimikatz_mllvm.bin" -Force
+
       - name: Upload mimikatz Artifact
         uses: actions/upload-artifact@v4
         with:
           name: mimikatz_mllvm
-          path: examples/mimikatz/x64/mimikatz_mllvm.bin
+          path: release_artifacts/mimikatz_mllvm.bin
           if-no-files-found: error
 
   # ------------------------------------------------------------------
@@ -154,6 +160,11 @@ jobs:
           Copy-Item "release_artifacts/MemLLVM.dll" "bin/MemLLVM.dll" -Force
           Write-Host "[+] Staged bin/MemLLVM.dll ($((Get-Item 'bin/MemLLVM.dll').Length) bytes)"
 
+      - name: Install Python Build Dependencies
+        shell: pwsh
+        run: |
+          pip install --upgrade pefile
+
       - name: Build All Flat Binary Examples (Batch Suite)
         shell: pwsh
         run: |
@@ -178,18 +189,35 @@ jobs:
             Write-Host "[+] Verified $bin: $len bytes"
           }
 
+      - name: Stage Examples Flat Binaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "release_artifacts" -Force | Out-Null
+          $bins = @(
+            "examples/box2d/box2d.bin",
+            "examples/chip8/chip8.bin",
+            "examples/doom/doom.bin",
+            "examples/imgui/imgui_demo.bin",
+            "examples/sqlite/sqlite3.bin",
+            "examples/winmine/winmine.bin",
+            "examples/mock_cli/mock_cli.bin"
+          )
+          foreach ($b in $bins) {
+            Copy-Item $b "release_artifacts/" -Force
+          }
+
       - name: Upload Examples Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: examples_binaries
           path: |
-            examples/box2d/box2d.bin
-            examples/chip8/chip8.bin
-            examples/doom/doom.bin
-            examples/imgui/imgui_demo.bin
-            examples/sqlite/sqlite3.bin
-            examples/winmine/winmine.bin
-            examples/mock_cli/mock_cli.bin
+            release_artifacts/box2d.bin
+            release_artifacts/chip8.bin
+            release_artifacts/doom.bin
+            release_artifacts/imgui_demo.bin
+            release_artifacts/sqlite3.bin
+            release_artifacts/winmine.bin
+            release_artifacts/mock_cli.bin
           if-no-files-found: error
 
   # ------------------------------------------------------------------
