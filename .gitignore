@@ -42,6 +42,7 @@ CMakeUserPresets.json
 *.lib
 *.a
 *.exp
+*.res
 
 # Executables, DLLs, and flat binaries
 *.exe

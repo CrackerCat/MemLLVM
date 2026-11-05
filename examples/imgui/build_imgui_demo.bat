@@ -16,6 +16,8 @@ if "%CLANG_BIN%"=="" (
         if exist "%LLVM_ROOT%\bin\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\bin\clang-cl.exe"
         if exist "%LLVM_ROOT%\clang-cl.exe" set "CLANG_BIN=%LLVM_ROOT%\clang-cl.exe"
     )
+    if exist "C:\LLVM-22-plugin\bin\clang-cl.exe" set "CLANG_BIN=C:\LLVM-22-plugin\bin\clang-cl.exe"
+    if exist "C:\LLVM-22-dev\bin\clang-cl.exe" set "CLANG_BIN=C:\LLVM-22-dev\bin\clang-cl.exe"
 )
 if "%CLANG_BIN%"=="" where clang-cl.exe >nul 2>&1 && set "CLANG_BIN=clang-cl.exe"
 
@@ -24,6 +26,8 @@ if "%LLD_BIN%"=="" (
         if exist "%LLVM_ROOT%\bin\lld-link.exe" set "LLD_BIN=%LLVM_ROOT%\bin\lld-link.exe"
         if exist "%LLVM_ROOT%\lld-link.exe" set "LLD_BIN=%LLVM_ROOT%\lld-link.exe"
     )
+    if exist "C:\LLVM-22-plugin\bin\lld-link.exe" set "LLD_BIN=C:\LLVM-22-plugin\bin\lld-link.exe"
+    if exist "C:\LLVM-22-dev\bin\lld-link.exe" set "LLD_BIN=C:\LLVM-22-dev\bin\lld-link.exe"
 )
 if "%LLD_BIN%"=="" where lld-link.exe >nul 2>&1 && set "LLD_BIN=lld-link.exe"
 

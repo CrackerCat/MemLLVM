@@ -33,19 +33,55 @@ def resolve_llvm_tool(tool_name):
     print(f"[-] ERROR: Required tool '{tool_name}' not found!", file=sys.stderr)
     sys.exit(1)
 
-def resolve_rc_exe():
-    cand = r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.28000.0\x64\rc.exe"
-    if os.path.exists(cand):
-        return cand
-    w = shutil.which("rc.exe") or shutil.which("rc")
-    if w:
-        return w
-    print("[-] ERROR: rc.exe not found!", file=sys.stderr)
-    sys.exit(1)
+def resolve_rc_and_sdk_includes():
+    base_bin = r"C:\Program Files (x86)\Windows Kits\10\bin"
+    base_inc = r"C:\Program Files (x86)\Windows Kits\10\Include"
+    rc_exe = shutil.which("rc.exe") or shutil.which("rc")
+    um_inc = None
+    shared_inc = None
+
+    if os.path.exists(base_inc):
+        versions = [d for d in os.listdir(base_inc) if d.startswith("10.") and os.path.isdir(os.path.join(base_inc, d))]
+        def ver_key(v):
+            try:
+                return [int(x) for x in v.split(".")]
+            except Exception:
+                return [0]
+        versions.sort(key=ver_key, reverse=True)
+        for v in versions:
+            u = os.path.join(base_inc, v, "um")
+            s = os.path.join(base_inc, v, "shared")
+            if os.path.isdir(u) and os.path.isdir(s):
+                if not um_inc:
+                    um_inc = u
+                    shared_inc = s
+                if not rc_exe:
+                    cand_rc = os.path.join(base_bin, v, "x64", "rc.exe")
+                    if os.path.exists(cand_rc):
+                        rc_exe = cand_rc
+                if rc_exe and um_inc:
+                    break
+
+    if not rc_exe:
+        for cand in [
+            r"C:\LLVM-22-plugin\bin\llvm-rc.exe",
+            r"C:\LLVM-22-dev\bin\llvm-rc.exe",
+        ]:
+            if os.path.exists(cand):
+                rc_exe = cand
+                break
+        if not rc_exe:
+            rc_exe = shutil.which("llvm-rc.exe") or shutil.which("llvm-rc")
+
+    if not rc_exe:
+        print("[-] ERROR: Resource compiler (rc.exe / llvm-rc.exe) not found!", file=sys.stderr)
+        sys.exit(1)
+
+    return rc_exe, um_inc, shared_inc
 
 CLANG_CL = resolve_llvm_tool("clang-cl")
 LLD_LINK = resolve_llvm_tool("lld-link")
-RC_EXE = resolve_rc_exe()
+RC_EXE, UM_INC, SHARED_INC = resolve_rc_and_sdk_includes()
 
 PLUGIN_DLL = os.environ.get("PLUGIN_DLL")
 if not PLUGIN_DLL or not os.path.exists(PLUGIN_DLL):
@@ -84,17 +120,18 @@ def main():
     print(f"[*] Compiler   : {CLANG_CL}")
     print(f"[*] Linker     : {LLD_LINK}")
     print(f"[*] RC         : {RC_EXE}")
+    print(f"[*] SDK UM Inc : {UM_INC}")
     print(f"[*] Plugin     : {PLUGIN_DLL}")
 
     # 1. Compile resource script
     print("\n[*] [Stage 1/4] Compiling Windows resource script (winmine.rc)...")
-    rc_cmd = [
-        RC_EXE,
-        "/i", r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\um",
-        "/i", r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\shared",
-        "/fo", WINMINE_RES,
-        WINMINE_RC
-    ]
+    rc_cmd = [RC_EXE]
+    if UM_INC:
+        rc_cmd.extend(["/i", UM_INC])
+    if SHARED_INC:
+        rc_cmd.extend(["/i", SHARED_INC])
+    rc_cmd.extend(["/fo", WINMINE_RES, WINMINE_RC])
+
     res = subprocess.run(rc_cmd, cwd=SCRIPT_DIR)
     if res.returncode != 0:
         print("[-] RC compilation failed!")

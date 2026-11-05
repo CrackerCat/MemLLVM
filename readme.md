@@ -6,11 +6,12 @@
 ### Next-Generation LLVM Pass Plugin & Freestanding C/C++ Runtime for Position-Independent Flat Machine Code Generation
 **Turn Full-Fledged Modern C and C++20 Projects Directly into Standalone, In-Memory Runnable Flat Machine Code (`.bin`)**
 
+[![Continuous Integration](https://github.com/Laster-dev/MemLLVM/actions/workflows/ci.yml/badge.svg)](https://github.com/Laster-dev/MemLLVM/actions/workflows/ci.yml)
 [![Build & Release](https://github.com/Laster-dev/MemLLVM/actions/workflows/release.yml/badge.svg)](https://github.com/Laster-dev/MemLLVM/actions/workflows/release.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6.svg?logo=windows)](https://microsoft.com)
 [![Toolchain](https://img.shields.io/badge/Toolchain-LLVM%20%2F%20Clang--cl%2022-269539.svg?logo=llvm)](https://llvm.org)
 [![Standard](https://img.shields.io/badge/Language-C17%20%2F%20C%2B%2B20-f34b7d.svg?logo=c%2B%2B)](https://isocpp.org)
-[![Coverage](https://img.shields.io/badge/C%2FC%2B%2B%20Coverage-%3E99.5%25-brightgreen.svg)](#-3-coverage-matrix--what-is-not-supported)
+[![Coverage](https://img.shields.io/badge/C%2FC%2B%2B%20Coverage-%3E99.5%25-brightgreen.svg)](#-industrial-coverage--in-depth-architectural-boundaries)
 [![License](https://img.shields.io/badge/License-MIT-blueviolet.svg)](LICENSE)
 
 [**English Documentation**](readme.md) | [**简体中文技术文档**](readme_zh.md)
@@ -21,16 +22,16 @@
 
 ## 🌟 What is MemLLVM?
 
-**MemLLVM** is an industrial-grade compiler infrastructure built as an out-of-tree **LLVM New Pass Manager plugin** for the Windows `clang-cl` compiler.
+**MemLLVM** is an industrial-grade compiler infrastructure built as an out-of-tree **LLVM New Pass Manager plugin** paired with a freestanding runtime library, specifically tailored for the Windows `clang-cl` toolchain.
 
-Unlike traditional shellcode generators, packers, or in-memory PE loaders (such as Reflective DLL Injection), **MemLLVM does not emulate Windows or wrap binaries in heavy loaders**. Instead, it performs **deep AST and LLVM Intermediate Representation (IR) transformations during compilation**, erasing all assumptions about the operating system's PE loader (`ntdll!LdrLoadDll`, section mapping, IAT initialization, relocation directories, and OS TLS).
+Unlike traditional shellcode generators, binary packers, or in-memory PE loaders (such as Reflective DLL Injection), **MemLLVM does not emulate Windows or wrap binaries in heavy multi-stage loaders**. Instead, it performs **deep LLVM Intermediate Representation (IR) transformations during compilation**, systematically stripping all assumptions about the operating system's native PE loader (`ntdll!LdrLoadDll`, section mapping and alignment, IAT resolution, relocation directories, and OS TLS slot allocation).
 
-The result: Your high-level C or C++20 code (including templates, virtual inheritance, static constructors, multithreading, DirectX 11 graphics, and file I/O) compiles into a **pure, contiguous, self-relocating flat binary (`.bin`)** that can be injected into any executable memory page and executed directly via a single function pointer call:
+The result: Your high-level C or C++20 code (including templates, virtual inheritance, static constructors, multithreading, DirectX 11 graphics, and file I/O) compiles into a **pure, contiguous, self-relocating flat binary image (`.bin`)**. It can be mapped into any executable memory page and executed directly via a single parameterless function pointer:
 
 ```cpp
 typedef void (*ShellcodeEntry)();
 ShellcodeEntry entry = (ShellcodeEntry)pMemory;
-entry(); // Boots up full C++20 runtime, static objects, and main() instantly!
+entry(); // Boots up the C++20 runtime, static initializers, and enters main() instantly!
 ```
 
 ---
@@ -41,12 +42,12 @@ entry(); // Boots up full C++20 runtime, static objects, and main() instantly!
 +-------------------------------------------------------------------------------------------------+
 |                                    MemLLVM Compilation Pipeline                                 |
 +-------------------------------------------------------------------------------------------------+
-|  [Modern C / C++20 Source Code]  --->  [Clang AST / LLVM IR Engine]                             |
+|  [Modern C / C++20 Source Code]  --->  [Clang AST Frontend / LLVM IR Optimizer Engine]           |
 |                                                  |                                              |
 |                                                  v                                              |
 |                     +---------------------------------------------------------+                 |
 |                     |             MemLLVM 8-Stage IR Pass Plugin              |                 |
-|                     |  1. AutoMemoryPass     - Synthesizes Heap Allocators    |                 |
+|                     |  1. AutoMemoryPass     - Synthesizes Freestanding Heap  |                 |
 |                     |  2. StlStubPass        - Erases C++ Exception / TLS     |                 |
 |                     |  3. GlobalLifecyclePass- Replaces .CRT$XCU with IR Ctor |                 |
 |                     |  4. GlobalSectionPass  - Merges .text/.data/.rdata/.bss |                 |
@@ -74,74 +75,49 @@ entry(); // Boots up full C++20 runtime, static objects, and main() instantly!
 
 ## 🎯 Industrial Coverage & In-Depth Architectural Boundaries
 
-While MemLLVM breaks through compiler-level barriers—achieving unprecedented C++20 language completeness in pure memory—operating completely outside the operating system's native PE loader inevitably meets fundamental **environmental and OS contract boundaries**.
+Across numerous systemic refactorings and production iterations, MemLLVM has solved the core challenges of modern C++ in loaderless environments: virtual table rebasing, Windows resource directory parsing, ordinal-only imports, dual-CRT stdio conflicts, atomic initialization, freestanding memory management, and table-driven SEH exception unwinding.
 
-When designing or porting complex software into loaderless flat binaries, developers must understand and observe the following **six core architectural boundaries**:
+### ✅ Fully Supported at the Compiler & Runtime Layer (Conquered Capabilities):
 
-### ✅ Fully Supported at the Compiler & Language Layer:
-| Domain | Supported Capabilities |
+| Domain | Supported Capabilities & Engineering Principles |
 | :--- | :--- |
-| **Language Features** | Templates, concepts, lambdas, Meyers singletons, `constexpr`, type traits, function pointers, multi-level virtual inheritance & dynamic polymorphism (`vtable`). |
-| **C++ Exceptions & Unwinding** | **Full `try` / `catch` / `throw` and re-throw (`throw;`) support**! Standalone table-based SEH runtime with self-registering dynamic `.pdata` function tables (`RtlAddFunctionTable`). Guaranteed deterministic reverse-order execution of local RAII destructors during stack unwinding. |
-| **Object Lifecycle** | Global & static object construction (`@llvm.global_ctors`), destruction on exit (`atexit`), deterministic scoping. |
-| **Memory Management** | Full freestanding `malloc`, `free`, `realloc`, `calloc`, `operator new`, `operator delete`, aligned allocation, bucketed arena allocators. |
-| **Concurrency & Threads** | Full `std::thread`, `std::mutex`, `std::recursive_mutex`, `std::condition_variable`, `std::shared_mutex`, `std::async`, `std::future`, atomic operations (`std::atomic`). |
-| **Standard I/O Streams** | Full `std::cout`, `std::cin`, `std::cerr`, `printf`, `wprintf`, `fgets`, pipe redirection, console interactive loops, file streams (`std::fstream`). |
-| **String & Containers** | `std::string`, `std::wstring`, `std::vector`, `std::map`, `std::unordered_map`, `std::queue`, `std::deque`, `std::span`, UTF-8 / UTF-16 conversions. |
-| **Filesystem & OS APIs** | Standard `std::filesystem::path`, directory iterators, Win32 I/O, Win32 GUI, GDI vector rendering, DirectX 11 / DXGI hardware acceleration, Windows Multimedia (`winmm`). |
+| **Modern C++20 Language Core** | Template metaprogramming, concepts, lambdas, `constexpr`, type traits, function pointers, multi-level virtual inheritance & dynamic polymorphism (`vtable`). **Meyers Thread-Safe Singletons Fully Supported**: `StlStubPass` rewrites implicit TLS checks and `_Init_thread_epoch` calls into atomic CAS instructions on flat memory, completely severing OS TLS dependencies. |
+| **Native PE Resource Subsystem (`.rsrc`)** | **Full Win32 resource hierarchy without PE headers**! The extractor preserves the `.rsrc` physical section, while the bootstrap stub dynamically rebinds base addresses. The freestanding LTL runtime embeds an in-memory 3-level directory parser (Type -> Name/ID -> Language), transparently shimming `FindResource(Ex)A/W`, `LoadResource`, `LockResource`, `SizeofResource`, `LoadStringA/W` (decoding 16-entry Pascal strings), `DialogBoxParamA/W`, `CreateDialogParamA/W`, `LoadMenuA/W`, `LoadAcceleratorsA/W`, `LoadIconA/W`, `LoadCursorA/W`, `LoadBitmapA/W`, and directory enumerators, with automatic fallback for system DLL resources. |
+| **Ordinal-Only (`[NONAME]`) Exports** | **Complete coverage of Windows un-named exports**! Pre-indexes all 2,729 ordinal exports across 80 system DLLs in Windows 10/11 SDK with $O(\log N)$ compile-time binary search; `ApiResolvePass` rewrites calls to `MemLLVM_GetApiAddressByOrdinal`; the bootstrap resolver natively handles recursive multi-hop forwarders (`DLL.#ordinal` and `DLL.func`) and `<dll>_Ordinal_<ord>` calls. |
+| **C++ Exceptions & Stack Unwinding** | **Full `try` / `catch` / `throw` and rethrow (`throw;`) support**! Standalone table-driven SEH engine: the bootstrap stub dynamically registers `.pdata` function tables (`RtlAddFunctionTable`) with the Windows kernel using the `MEMLLVME` descriptor, guaranteeing 100% deterministic reverse-order execution of local RAII destructors during stack unwinding. |
+| **Dual-CRT Stdio & Console I/O** | Directly disassembles and pierces the PEB, clearing the undocumented `WindowFlags` `0x400` and `0x200` intercept bits; simultaneously intercepts file descriptor tables in both `msvcrt.dll` and `ucrtbase.dll`, providing full support for `std::cout`, `std::cin`, `std::cerr`, `printf`, `wprintf`, `fgets`, pipe redirection, and interactive console REPLs. |
+| **Object Lifecycle Management** | Global and static constructors invoked automatically at startup (`@llvm.global_ctors`), registered destructors executed in reverse order on exit (`atexit`), precise RAII deterministic scoping. |
+| **Memory Allocation Subsystem** | Fully freestanding `malloc`, `free`, `realloc`, `calloc`, `operator new`, `operator delete`, aligned allocations, and high-performance bucketed arena allocators. |
+| **Concurrency & Multithreading** | Full standard concurrency: `std::thread`, `std::mutex`, `std::recursive_mutex`, `std::condition_variable`, `std::shared_mutex`, `std::async`, `std::future`, and lock-free atomic operations (`std::atomic`). |
+| **Graphics & System Ecosystem** | Native Win32 window message pumps, GDI vector rendering, **DirectX 11 / DXGI hardware acceleration pipeline** (Dear ImGui), Windows multimedia audio (`winmm`), standard file streams (`std::fstream`), and filesystem paths (`std::filesystem`). |
 
 ---
 
-### ⚠️ The 6 Real-World Architectural Boundaries & Best Practices:
+### ⚠️ The 4 Real-World Architectural Boundaries & Best Practices:
+
+Operating completely outside the operating system's native PE loader inevitably meets fundamental system contracts and host process co-existence boundaries:
 
 #### 1. Module Identity & Filesystem Context Severance
-* **The `GetModuleHandle(NULL)` and `GetModuleFileName` Impersonation Trap**:
-  In loaderless memory execution, the operating system does not assign an independent `HMODULE` to the flat binary. Any library or code calling `GetModuleHandle(NULL)` or `GetModuleFileName(NULL, ...)` to locate "its own folder" for sibling assets (e.g. fonts, SQLite DBs, config files) will unexpectedly receive the **absolute path of the HOST process** (e.g., `explorer.exe` or the loader itself)!
+* **The `GetModuleHandle(NULL)` and `GetModuleFileName` Host Path**:
+  In loaderless execution, the operating system never assigns an independent `HMODULE` to the flat binary. Calling `GetModuleHandle(NULL)` or `GetModuleFileName(NULL, ...)` returns the **absolute path of the host process** (e.g., `explorer.exe` or the test loader).
   - **Best Practice**: Never rely on `GetModuleFileName(NULL)` to locate companion assets. Pass paths explicitly via `main` arguments, use absolute paths, or embed assets as inline byte arrays.
 * **Current Working Directory (CWD) Reliance**:
-  Relative paths (e.g., `fopen("config.ini", "r")`) resolve against the host process's active working directory, not the memory blob's location.
+  Relative paths (e.g., `fopen("config.ini", "r")`) resolve against the host process's active working directory.
 
-#### 2. Absence of Native PE Loader Facilities
-* **Native Windows PE Resources (`.rsrc` / RC Files / Dialog Templates / String Tables - Fully Solved)**:
-  Traditional shellcode tools strip PE headers and the `.rsrc` section, rendering all native Win32 resource APIs (`FindResource`, `LoadString`, `DialogBox`) dysfunctional.
-  **MemLLVM provides full, end-to-end native support for the PE resource system**:
-  1. **`.rsrc` Section Preservation & Rebase Binding**: `extract_flat_bin.py` packs the compiled `.rsrc` section into the flat image, while the entry bootstrap stub dynamically binds the `MemLLVM_ResourceInfo` descriptor to the runtime image base.
-  2. **In-Memory 3-Level Resource Directory Engine**: LTL embeds a zero-dependency `IMAGE_RESOURCE_DIRECTORY` search engine supporting Type -> Name/ID -> Language lookups.
-  3. **Full Win32 Resource API Shims**: Seamlessly intercepts `FindResource(Ex)A/W`, `LoadResource`, `LockResource`, `SizeofResource`, `LoadStringA/W` (decoding 16-entry Pascal strings), `DialogBoxParamA/W`, `CreateDialogParamA/W`, `LoadMenuA/W`, `LoadAcceleratorsA/W`, `LoadIconA/W`, `LoadCursorA/W`, `LoadBitmapA/W`, and `EnumResource*` enumeration routines.
-  4. **Transparent System Module Fallback**: When `hModule` refers to an external DLL (e.g. system icons `IDI_APPLICATION`, `IDC_ARROW` in `user32.dll`), automatically delegates back to the Windows OS API.
-  5. **Compile-Time `ApiResolvePass` Import Slot Rewriting**: Rewrites `__imp_*` loads to direct pointers into `ltl.lib`, completely decoupling the binary from external `kernel32.dll`/`user32.dll` resource import thunks.
-* **Windows Manifests, ComCtl32 v6 Visual Styles & High-DPI**:
-  Standard PEs rely on embedded manifests (`RT_MANIFEST`) to activate Common Controls v6 (modern visual styles) and declare DPI awareness. In a flat binary, standard Win32 dialogs fallback to classic Windows 2000 flat appearance.
-  - **Best Practice**: Use self-rendered UI engines (DirectX 11 / Direct2D / Dear ImGui), or programmatically mount activation contexts via `CreateActCtx` and call `SetProcessDpiAwarenessContext`.
-* **Namespace-Scope `thread_local` & TLS Callbacks**:
-  While thread-safe local statics are rewritten into atomic CAS, namespace-scope and class-static `thread_local` variables still require `__tls_index` slots. Furthermore, the OS loader cannot fire `PIMAGE_TLS_CALLBACK` notifications when new threads spawn.
-  - **Best Practice**: Use explicit Win32 TLS APIs (`TlsAlloc`, `TlsGetValue`, `TlsSetValue`) for thread-specific state.
-
-#### 3. Execution Morphology & Library Boundaries
+#### 2. Execution Morphology & Library Boundaries
 * **Single-Entry Payload Model vs. Shared Library (No EAT)**:
   MemLLVM generates a standalone execution payload with a single entry point (offset 0 jumping to `main` after self-rebasing). **It cannot act as a multi-export Dynamic Link Library (DLL)** exporting dozens of named symbols for external callers.
 * **Strictly x64 Architecture Exclusivity**:
-  The entire pipeline (PE parsing, DIR64 fixups, ROR13 API resolution, 12-byte `.pdata` tables, and x64 assembly stubs) is hardcoded for the **Windows x86_64 ABI**. It **does not support 32-bit x86 (IA-32)** (which requires `FS:[0x30]`, HIGHLOW relocations, and linked-list SEH) or **ARM64**.
+  The entire pipeline (PE parsing, DIR64 fixups, ROR13 API resolution, 12-byte `.pdata` tables, and x64 assembly stubs) is hardcoded for the **Windows x86_64 ABI**. It does not support 32-bit x86 (IA-32) or ARM64.
 
-#### 4. Host Process Lifecycle Coupling
+#### 3. Host Process Lifecycle Coupling
 * **The `exit()` / `abort()` Host Termination Risk**:
-  In a standalone EXE, calling `exit(code)` terminates normally. When running as an in-memory payload inside a host process, calling standard library `exit()` or `abort()` calls `ExitProcess`, **instantly killing the entire host process**!
+  In a standalone EXE, calling `exit(code)` terminates normally. When running as an in-memory payload inside a host process, calling `exit()` calls `ExitProcess`, **instantly killing the entire host process**!
   - **Best Practice**: If the payload must return cleanly to the host, it must `return` from `main()` or invoke `ExitThread`. Avoid calling `exit()` in embedded scenarios.
 * **Direct Command Line (`GetCommandLine`) Query Pollution**:
   `GetCommandLineA/W` returns the host process's creation command line. While MemLLVM's stub reconstructs `main(argc, argv)`, libraries bypassing `main` and querying the PEB directly will observe host parameters.
 
-#### 5. Dynamic API Resolution & Full Ordinal Support
-* **Native & Transparent Ordinal-Only API Auto-Resolution**:
-  In the Windows ecosystem, core system DLLs such as `shlwapi.dll` (551 functions), `shell32.dll` (364 functions), `ws2_32.dll`, and `comctl32.dll` export hundreds of functions solely by integer ordinal (`[NONAME]` exports like `SHAlloc`, `SHFree`, `ConnectToConnectionPoint`), omitting function name strings from PE export tables.
-  MemLLVM provides full, end-to-end native support for ordinal-only resolution:
-  1. **SDK Ordinal Index Database**: Pre-indexes all 2,729 Windows SDK ordinal-only exports across 80 system DLLs with O(log N) compile-time binary search, plus dynamic ordinal parsing for project-local `.lib` files.
-  2. **Compile-Time IR Inlining**: `ApiResolvePass` automatically rewrites implicit calls, `invoke` exception sites, and `__imp_*` slot loads to `MemLLVM_GetApiAddressByOrdinal(dll_hash, ordinal)` with zero linker import dependencies, accompanied by proactive DLL preloading from `AutoLoadLibraryPass`.
-  3. **Global Pointer & Vtable Auto-Rebasing**: `GlobalPointerPass` automatically rebases address-taken ordinal function pointers in global variables and vtables at entry time.
-  4. **Multi-hop Forwarder Resolution & Synthetic Symbols**: The runtime bootstrap resolver natively resolves forwarders (`DLL.#ordinal` and `DLL.func`) and supports calling arbitrary private ordinals using `<dll>_Ordinal_<ord>` or `<dll>_<ord>`.
-* **Explicit Loading Boundary for Custom Non-SDK Private DLLs**:
-  If a payload depends on a completely proprietary third-party DLL that is neither in the Windows SDK database nor accompanied by an import `.lib` during compilation, the DLL must be loaded via `LoadLibraryA("custom.dll")` to populate the PEB module list before resolving functions from it.
-
-#### 6. Modern OS Security Mitigations
+#### 4. Modern OS Security Mitigations
 * **W^X and DEP Memory Protection**:
   Flat binaries require executable memory pages (allocated with `PAGE_EXECUTE_READWRITE` or switched from RW to RX via `VirtualProtect` before execution).
 * **Control Flow Guard (CFG) & Arbitrary Code Guard (ACG)**:
@@ -149,29 +125,28 @@ When designing or porting complex software into loaderless flat binaries, develo
 
 ---
 
-## 🕳️ Hard-Fought Engineering Pits & Technical Breakthroughs
+## 🕳️ Engineering Pitfalls & Battle-Tested Breakthroughs
 
-Building MemLLVM meant fighting against subtle, undocumented Windows internals and compiler edge-cases. Here is a candid record of the hardest traps solved during development:
+Building MemLLVM required navigating subtle, undocumented Windows kernel behaviors and compiler edge-cases. Here is a record of the hardest challenges solved during development:
 
 <details>
 <summary><b>1. The Undocumented Windows <code>GetStdHandle</code> WindowFlags 0x400 / 0x200 Trap</b> (Click to expand)</summary>
 
 #### The Trap:
-When running CLI tools (like SQLite3 or diagnostic interactive stubs) inside a GUI-based pipe loader, `SetStdHandle(STD_OUTPUT_HANDLE, hPipeWrite)` returned `TRUE`, yet subsequent calls to `GetStdHandle(STD_OUTPUT_HANDLE)` in the payload returned `0x(nil)` (NULL)!
-While MemLLVM-LTL had a fallback to `_get_osfhandle(1)`, native MSVC/UCRT binaries saw NULL, assumed the process was non-interactive or output was broken, and dropped all output or terminated instantly.
+When running CLI tools inside a GUI-based pipe loader, `SetStdHandle(STD_OUTPUT_HANDLE, hPipeWrite)` returned `TRUE`, yet subsequent calls to `GetStdHandle(STD_OUTPUT_HANDLE)` in the payload returned `0x(nil)` (NULL)! Native MSVC/UCRT binaries saw NULL, assumed the process was non-interactive, and dropped all output or terminated instantly.
 
 #### The Discovery:
 We disassembled Windows 11/10 `kernelbase!GetStdHandle`:
 ```x86asm
 GetStdHandle:
-    mov rax, gs:[0x60]                   ; rax = PEB
+    mov rax, gs:[0x60]                   ; rax = Current Process PEB
     mov rcx, [rax + 0x20]                ; rcx = ProcessParameters
     test dword ptr [rcx + 0xa4], 0x400   ; Test WindowFlags at offset 0xA4!
     jne return_null                      ; If bit 0x400 is set, FORCIBLY RETURN NULL!
-    mov rax, [rcx + 0x28]                ; Return StandardOutput
+    mov rax, [rcx + 0x28]                ; Otherwise return StandardOutput
     ret
 ```
-When a process is launched by Windows Explorer or `ShellExecuteEx`, Windows sets bit `0x400` in `WindowFlags`. Even if you call `SetStdHandle`, Windows only writes to the handle slot without clearing `0x400`! `GetStdHandle` sees the flag, assumes stdout is an icon/monitor handle, and forcibly returns NULL.
+When a process is launched by Windows Explorer or `ShellExecuteEx`, Windows sets bit `0x400` in `WindowFlags`. Standard calls to `SetStdHandle` only write to the handle slot without clearing `0x400`! `GetStdHandle` sees the flag and forcibly returns NULL.
 
 #### The Breakthrough:
 MemLLVM's loader harness inspects the PEB directly via `__readgsqword(0x60)`, clears `0x400` (and stdin's `0x200`) from `ProcessParameters->WindowFlags`, and sets `STARTF_USESTDHANDLES (0x100)`, unlocking 100% reliable pipe and console I/O for all native tools!
@@ -191,30 +166,30 @@ We implemented dual-table redirection in the loader harness: dynamically inspect
 </details>
 
 <details>
-<summary><b>3. The Clang Pass Plugin C++ ABI Mismatch (Heap Corruption 0xC0000374)</b> (Click to expand)</summary>
+<summary><b>3. The Clang Pass Plugin C++ ABI Mismatch (Heap Corruption <code>0xC0000374</code>)</b> (Click to expand)</summary>
 
 #### The Trap:
 Building an out-of-tree LLVM pass plugin against LLVM header files and loading it into an official LLVM release installer crashed immediately during pass registration with `STATUS_HEAP_CORRUPTION (0xC0000374)`.
 
 #### The Discovery:
-LLVM's C++ codebase makes extensive use of STL containers (`std::vector`, `llvm::StringRef`, `llvm::SmallVector`) without an ABI freeze across builds. Even minor compiler flag differences (e.g. `/MT` vs `/MD`, debug iterators, MSVC version differences) corrupt memory when passing objects across DLL boundaries.
+LLVM's C++ codebase makes extensive use of STL containers (`std::vector`, `llvm::StringRef`, `llvm::SmallVector`) without an ABI freeze across builds. Minor compiler flag differences (e.g. `/MT` vs `/MD`, debug iterators, MSVC version differences) corrupt memory when passing objects across DLL boundaries.
 
 #### The Breakthrough:
-We published and committed a pinned, hermetic plugin-compatible compiler toolchain (`clang-plugin-toolchain.zip` in GitHub Releases and `release_artifacts/`) ensuring 100% binary compatibility on every developer machine and GitHub CI runner.
+We publish and commit a pinned, hermetic plugin-compatible compiler toolchain (`clang-plugin-toolchain.zip` in GitHub Releases and `release_artifacts/`) ensuring 100% binary compatibility on every developer machine and GitHub CI runner.
 </details>
 
 <details>
 <summary><b>4. Thread-Safe Local Statics (Meyers Singleton) Invoking Invalid TLS</b> (Click to expand)</summary>
 
 #### The Trap:
-C++11/C++20 guarantees thread-safe initialization of local static variables. MSVC and Clang implement this by emitting calls to `_Init_thread_epoch` and accessing `__tls_index` via `gs:[0x58]`. In a flat binary, this immediately triggered an access violation (`0xC0000005`).
+C++ guarantees thread-safe initialization of local static variables. MSVC and Clang implement this by emitting calls to `_Init_thread_epoch` and accessing `__tls_index` via `gs:[0x58]`. In a flat binary, this immediately triggered an access violation (`0xC0000005`).
 
 #### The Breakthrough:
 MemLLVM's `StlStubPass` detects these compiler-generated TLS checks at the IR level and rewrites them into atomic lock-free compare-and-swap operations on non-TLS global storage, completely eliminating the OS TLS dependency while preserving thread safety!
 </details>
 
 <details>
-<summary><b>5. Windows x64 SEH Exception Unwinding & The Missing .pdata Pitfall</b> (Click to expand)</summary>
+<summary><b>5. Windows x64 SEH Exception Unwinding & The Missing <code>.pdata</code> Pitfall</b> (Click to expand)</summary>
 
 #### The Trap:
 After implementing `_CxxThrowException`, `__CxxFrameHandler3`, and registering function tables via `RtlAddFunctionTable`, throwing an exception (`throw 42;`) still caused the process to abruptly crash with unhandled exception code `0xE06D7363`, completely bypassing the outer `catch` handler.
@@ -229,7 +204,7 @@ Windows x64 employs a strictly table-driven exception dispatch model. When `_Cxx
 </details>
 
 <details>
-<summary><b>6. Undocumented Ordinal-Only ([NONAME]) Exports & Multi-Hop Forwarder Chains</b> (Click to expand)</summary>
+<summary><b>6. Undocumented Ordinal-Only (<code>[NONAME]</code>) Exports & Multi-Hop Forwarder Chains</b> (Click to expand)</summary>
 
 #### The Trap:
 Calling common Windows Shell or networking APIs (such as `SHAlloc`, `SHFree`, or `ConnectToConnectionPoint`) works normally in a standard executable, but when converted into flat shellcode, calls crash immediately with a null pointer (`0x00000000`) or linger as unresolved link-time imports.
@@ -244,7 +219,7 @@ The PE specification allows DLLs to export functions purely by numeric index (`[
 </details>
 
 <details>
-<summary><b>7. Reconstructing Native PE Resource Subsystem (.rsrc) in Headless Flat Binaries</b> (Click to expand)</summary>
+<summary><b>7. Reconstructing Native PE Resource Subsystem (<code>.rsrc</code>) in Headless Flat Binaries</b> (Click to expand)</summary>
 
 #### The Trap:
 Windows developers extensively use `.rc` resource scripts to bundle icons, string tables (`STRINGTABLE`), dialog templates (`DIALOGEX`), menus, accelerators, and raw binary assets (`RCDATA`). In flat binaries without PE headers, calling `FindResource`, `LoadString`, or `DialogBoxParam` fails with NULL or triggers crashes.
@@ -269,7 +244,7 @@ Win32 resource functions under `kernel32` / `user32` traverse the PE resource tr
 
 ## 🏆 Verified Showcase Projects (From `examples/`)
 
-Every project in `examples/` compiles directly from source into a **standalone, self-relocating flat binary (`.bin`)** with zero external dependencies:
+Every project in `examples/` compiles directly from source into a **standalone, self-relocating flat binary (`.bin`)** and is continuously compiled and verified on GitHub Actions CI:
 
 ```
 examples/
@@ -286,19 +261,48 @@ examples/
 | Showcase Project | Scale & Language | Flat Binary Size | Key Validated Capabilities |
 | :--- | :--- | :--- | :--- |
 | **[Classic Win32 Minesweeper](examples/winmine/)** | Pure C / Win32 (ReactOS Port) | **1.01 MB** | **Ultimate Native Resource Subsystem Showcase**: Bundles `.rsrc` directly into flat memory. Seamlessly parses `DialogBoxParamW` (Custom Game & Fastest Times modal dialogs), `LoadMenuW` menus, `LoadBitmapW` (smiley face, LED numbers, mine tiles), `LoadIconW`, `LoadAcceleratorsW`, and `LoadStringW` directly from memory without PE headers. |
-| **[Official SQLite3 CLI](examples/sqlite/)** | C / SQLite 3.45 | **340 KB** | Full interactive SQL REPL, in-memory database creation, complex SQL queries, table formatting, pipe streaming. |
-| **[Classic DOOM Engine](examples/doom/)** | Pure C (83 files) | **703 KB** | Full id Software DOOM engine, 3D software rasterization, keyboard controls, audio mixer, streaming IWAD data. |
-| **[Dear ImGui v1.91+](examples/imgui/)** | C++17 Industrial UI | **1.70 MB** | Full immediate-mode GUI, multi-window docking, plots, widgets, hardware-accelerated **DirectX 11 / DXGI** pipeline. |
-| **[Box2D 3.0 Engine](examples/box2d/)** | Pure C (45 files) | **605 KB** | Continuous rigid body physics, dynamic BVH trees, collision impulse solver, real-time Win32 GDI vector rendering. |
-| **[CHIP-8 Virtual Machine](examples/chip8/)** | Modern C++20 | **42 KB** | 35-opcode CPU emulation, frame timers, audio buzzer, 64x32 monochrome display matrix running *Pong* and *Tetris*. |
+| **[Official SQLite3 CLI](examples/sqlite/)** | C / SQLite 3.45 | **208 KB** | Full interactive SQL REPL, in-memory database creation, complex SQL queries, table formatting, pipe streaming. |
+| **[Classic DOOM Engine](examples/doom/)** | Pure C (83 files) | **605 KB** | Full id Software DOOM engine, 3D software rasterization, keyboard controls, audio mixer, streaming IWAD data. |
+| **[Dear ImGui v1.91+](examples/imgui/)** | C++17 Industrial UI | **813 KB** | Full immediate-mode GUI, multi-window docking, plots, widgets, hardware-accelerated **DirectX 11 / DXGI** pipeline. |
+| **[Box2D 3.0 Engine](examples/box2d/)** | Pure C (45 files) | **545 KB** | Continuous rigid body physics, dynamic BVH trees, collision impulse solver, real-time Win32 GDI vector rendering. |
+| **[CHIP-8 Virtual Machine](examples/chip8/)** | Modern C++20 | **30 KB** | 35-opcode CPU emulation, frame timers, audio buzzer, 64x32 monochrome display matrix running *Pong* and *Tetris*. |
 | **[Mimikatz 2.2.0](examples/mimikatz/)** | Complex C (114 Translation Units) | **1.20 MB** | Massive real-world code base testing tentative definitions merging, dynamic subsystem resolution, multi-tier struct alignment, and dual-CRT stdio pipe redirection. |
-| **[Mock CLI Diagnostic Stub](examples/mock_cli/)** | Minimal C Runtime | **36 KB** | Dedicated diagnostic tool testing full-duplex stdio pipes, command line argument forwarding, streaming output throughput, and graceful exit handling. |
+| **[Mock CLI Diagnostic Stub](examples/mock_cli/)** | Minimal C Runtime | **4.6 KB** | Dedicated diagnostic tool testing full-duplex stdio pipes, command line argument forwarding, streaming output throughput, and graceful exit handling. |
+
+> 💡 **Batch Compile All Examples Locally**: Run `python examples/build_all.py` from the repository root to compile and extract all 7 showcase binaries in ~15 seconds!
 
 ---
 
 ## 🚀 Quick Start Guide
 
-### 1. Download & One-Click Environment Setup
+### Path A: CLI Fast Track (Recommended)
+
+No complex IDE required. Convert any C/C++ project into a standalone flat binary in 4 clean steps:
+
+```bat
+:: 1. Compile source into COFF object with the MemLLVM IR Pass plugin
+clang-cl /c /O2 /GS- /GR- /clang:-fpass-plugin="%MEMLLVM_DIR%\bin\MemLLVM.dll" ^
+  /clang:-fno-jump-tables /clang:-fno-builtin ^
+  /I"%MEMLLVM_DIR%\include" /I"%MEMLLVM_DIR%\ltl\include" ^
+  main.cpp /Fo:main.obj
+
+:: 2. Link with the freestanding LTL runtime (no default CRT libraries)
+lld-link /NODEFAULTLIB /ENTRY:main /OPT:REF /OPT:ICF /ALIGN:512 /MERGE:.rdata=.text ^
+  /LIBPATH:"%MEMLLVM_DIR%\lib" /LIBPATH:"%MEMLLVM_DIR%\ltl" ^
+  main.obj ltl.lib kernel32.lib user32.lib /OUT:main.exe
+
+:: 3. Extract the position-independent flat binary (.bin)
+python "%MEMLLVM_DIR%\Tools\extract_flat_bin.py" main.exe main.bin
+
+:: 4. Execute and inspect immediately with the bundled loader
+"%MEMLLVM_DIR%\Tools\scloader_cli.exe" main.bin
+```
+
+---
+
+### Path B: Visual Studio Project (.vcxproj) Configuration
+
+#### 1. Download & One-Click Environment Setup
 1. Download `MemLLVM-SDK-windows-x64.zip` from the latest [GitHub Releases](https://github.com/Laster-dev/MemLLVM/releases).
 2. Extract to any directory (e.g. `C:\MemLLVM`).
 3. **Double-click `setup_env.bat`**:
@@ -308,11 +312,11 @@ examples/
    - **Smart Path Migration**: Moving the SDK in the future? Just run `setup_env.bat` again in the new folder—it automatically purges old stale paths.
    - **One-Click In-Place Auto-Update**: The SDK comes with `update.bat`. Run it at any time to automatically fetch the latest release from GitHub and overwrite your local SDK in-place, then re-synchronize configurations.
 
-### 2. Enable Clang in Visual Studio
+#### 2. Enable Clang in Visual Studio
 * **Option A (Recommended Built-in Component)**: Open Visual Studio Installer -> Modify -> Individual components -> Search `Clang` -> Check **C++ Clang Compiler for Windows** and **MSBuild support for LLVM toolset**.
 * **Option B (VSIX Extension)**: Visual Studio Extensions -> Manage Extensions -> Search & Install **LLVM Compiler Toolchain**.
 
-### 3. Visual Studio Project (.vcxproj) Configuration
+#### 3. Visual Studio Project (.vcxproj) Properties
 In your project properties:
 1. **General** -> **Platform Toolset**: Select **LLVM (clang-cl)**.
 2. **C/C++** -> **General** -> **Additional Include Directories**:

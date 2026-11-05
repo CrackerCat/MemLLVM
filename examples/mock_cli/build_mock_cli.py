@@ -16,8 +16,13 @@ def resolve_llvm_tool(tool_name):
             cand = os.path.join(base, f"{tool_name}.exe")
             if os.path.exists(cand):
                 return cand
-    if os.path.exists(rf"C:\LLVM-22-dev\bin\{tool_name}.exe"):
-        return rf"C:\LLVM-22-dev\bin\{tool_name}.exe"
+    for cand in [
+        rf"C:\LLVM-22-plugin\bin\{tool_name}.exe",
+        rf"C:\LLVM-22-dev\bin\{tool_name}.exe",
+        rf"C:\Program Files\LLVM\bin\{tool_name}.exe",
+    ]:
+        if os.path.exists(cand):
+            return cand
     w = shutil.which(tool_name) or shutil.which(f"{tool_name}.exe")
     if w:
         return w
@@ -109,13 +114,21 @@ def main():
     bin_size = os.path.getsize(BIN_FILE)
     print(f"[+] Successfully generated: {BIN_FILE} ({bin_size} bytes, {bin_size/1024.0:.2f} KB)")
 
-    # 4. Copy to SCLoader
+    # 4. Copy to release_artifacts and SCLoader
+    rel_dst = os.path.join(REPO_ROOT, "release_artifacts", "mock_cli.bin")
+    if os.path.exists(os.path.dirname(rel_dst)):
+        try:
+            shutil.copy2(BIN_FILE, rel_dst)
+            print(f"[+] Synchronized to: {rel_dst}")
+        except Exception as e:
+            pass
+
     scloader_dst = os.path.join(r"E:\C++project\CUI\SCLoader", "mock_cli.bin")
     try:
         shutil.copy2(BIN_FILE, scloader_dst)
         print(f"[+] Synchronized to: {scloader_dst}")
     except Exception as e:
-        print(f"[!] Note: Could not copy to {scloader_dst}: {e}")
+        pass
 
     return 0
 

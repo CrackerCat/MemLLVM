@@ -31,6 +31,14 @@ def resolve_llvm_tool(tool_name):
             if os.path.exists(cand):
                 return cand
 
+    for cand in [
+        rf"C:\LLVM-22-plugin\bin\{tool_name}.exe",
+        rf"C:\LLVM-22-dev\bin\{tool_name}.exe",
+        rf"C:\Program Files\LLVM\bin\{tool_name}.exe",
+    ]:
+        if os.path.exists(cand):
+            return cand
+
     w = shutil.which(tool_name) or shutil.which(f"{tool_name}.exe")
     if w:
         return w

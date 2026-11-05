@@ -114,10 +114,11 @@ jobs:
           if-no-files-found: error
 
   # ------------------------------------------------------------------
-  # Job 2: build official SQLite3 CLI flat binary from source on the runner.
+  # Job 2: build all flat binary examples from source on the runner
+  # (Box2D, CHIP-8, DOOM, Dear ImGui, SQLite3, WinMine, Mock CLI).
   # ------------------------------------------------------------------
-  build-sqlite:
-    name: Build SQLite3 Flat Binary
+  build-examples:
+    name: Build Flat Binary Examples Suite
     if: |
       contains(github.event.head_commit.message, 'release') ||
       contains(github.event.head_commit.message, 'Release') ||
@@ -150,36 +151,52 @@ jobs:
           Copy-Item "release_artifacts/MemLLVM.dll" "bin/MemLLVM.dll" -Force
           Write-Host "[+] Staged bin/MemLLVM.dll ($((Get-Item 'bin/MemLLVM.dll').Length) bytes)"
 
-      - name: Build SQLite3 CLI Flat Binary
+      - name: Build All Flat Binary Examples (Batch Suite)
         shell: pwsh
         run: |
-          python examples/sqlite/build_sqlite.py
-          if ($LASTEXITCODE -ne 0) { throw "build_sqlite.py failed with $LASTEXITCODE" }
+          python examples/build_all.py
+          if ($LASTEXITCODE -ne 0) { throw "build_all.py failed with $LASTEXITCODE" }
 
-      - name: Verify SQLite3 Flat Binary
+      - name: Verify Generated Flat Binaries
         shell: pwsh
         run: |
-          $bin = "examples/sqlite/sqlite3.bin"
-          if (-not (Test-Path $bin)) { throw "Flat binary was not produced: $bin" }
-          $size = (Get-Item $bin).Length
-          Write-Host "[+] sqlite3.bin: $size bytes"
-          if ($size -lt 50KB) { throw "Flat binary suspiciously small ($size bytes)" }
+          $expected = @(
+            "examples/box2d/box2d.bin",
+            "examples/chip8/chip8.bin",
+            "examples/doom/doom.bin",
+            "examples/imgui/imgui_demo.bin",
+            "examples/sqlite/sqlite3.bin",
+            "examples/winmine/winmine.bin",
+            "examples/mock_cli/mock_cli.bin"
+          )
+          foreach ($bin in $expected) {
+            if (-not (Test-Path $bin)) { throw "Expected binary missing: $bin" }
+            $len = (Get-Item $bin).Length
+            Write-Host "[+] Verified $bin: $len bytes"
+          }
 
-      - name: Upload SQLite3 Artifact
+      - name: Upload Examples Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sqlite3_bin
-          path: examples/sqlite/sqlite3.bin
+          name: examples_binaries
+          path: |
+            examples/box2d/box2d.bin
+            examples/chip8/chip8.bin
+            examples/doom/doom.bin
+            examples/imgui/imgui_demo.bin
+            examples/sqlite/sqlite3.bin
+            examples/winmine/winmine.bin
+            examples/mock_cli/mock_cli.bin
           if-no-files-found: error
 
   # ------------------------------------------------------------------
   # Job 3: verify precommitted artifacts, package SDK/tests/CSLoader
   # source, and publish the GitHub release. Waits for mimikatz and
-  # sqlite3 builds so the fresh .bin files land in the same release.
+  # examples builds so the fresh .bin files land in the same release.
   # ------------------------------------------------------------------
   release:
     name: Build & Release Flat Binaries
-    needs: [build-mimikatz, build-sqlite]
+    needs: [build-mimikatz, build-examples]
     if: |
       contains(github.event.head_commit.message, 'release') ||
       contains(github.event.head_commit.message, 'Release') ||
@@ -197,10 +214,10 @@ jobs:
           name: mimikatz_mllvm
           path: release_artifacts
 
-      - name: Download SQLite3 Flat Binary
+      - name: Download Examples Flat Binaries
         uses: actions/download-artifact@v4
         with:
-          name: sqlite3_bin
+          name: examples_binaries
           path: release_artifacts
 
       - name: Verify Release Artifacts
@@ -211,6 +228,8 @@ jobs:
             "release_artifacts/clang-plugin-toolchain.zip",
             "release_artifacts/mimikatz_mllvm.bin",
             "release_artifacts/sqlite3.bin",
+            "release_artifacts/winmine.bin",
+            "release_artifacts/mock_cli.bin",
             "release_artifacts/box2d.bin",
             "release_artifacts/chip8.bin",
             "release_artifacts/doom.bin",
@@ -293,7 +312,7 @@ jobs:
           Copy-Item "update.bat" "$sdk/" -Force
           Copy-Item "update.ps1" "$sdk/" -Force
 
-          # 6. Examples (mimikatz source + MemLLVM build config included)
+          # 6. Examples (all examples included)
           Copy-Item -Recurse "examples/*" "$sdk/examples/" -Force
 
           # 7. Compress into SDK zip package
@@ -371,11 +390,12 @@ jobs:
               - `ltl/`: Freestanding C/C++ runtime headers and `ltl.lib`
               - `Tools/`: `SCLoader.exe` interactive GUI payload runner & debugger
               - `src/`: Complete C++ source code of all LLVM passes
-              - `examples/`: Box2D, CHIP-8, DOOM, ImGui, SQLite and **mimikatz** (with full MemLLVM VS build config) example projects
+              - `examples/`: Full suite of 8 showcase projects (Box2D, CHIP-8, DOOM, ImGui, SQLite, WinMine, Mock CLI, and Mimikatz with full MemLLVM build configurations)
             - **`clang-plugin-toolchain.zip`**: Standalone download of the hermetic Clang compiler toolchain
             - **`MemLLVM-Tests.zip`**: Representative modern C and C++ test suite containing source `.cpp` files, compiled `.bin` flat binaries, batch verification scripts, and test assets
             - **`mimikatz_mllvm.bin`**: mimikatz 2.2.0 built **from source on the release runner** through the MemLLVM pass (114 translation units), standalone flat image, interactive mode working under pipe-based loaders
             - **`sqlite3.bin`**: Official SQLite3 Command Line Shell (CLI) interactive flat binary built **from source on the release runner** through the MemLLVM pass, runnable in memory with full interactive stdio/console and pipe support
+            - **`winmine.bin`**: Classic Win32 Minesweeper flat binary built **from source on the release runner**, fully demonstrating the native PE Resource (`.rsrc`) subsystem (menus, modal dialogs, icons, 16-color palette bitmaps, string tables, accelerators)
             - **`CSLoader-source.zip`**: CUI shellcode loader (CSLoader) **source code only** — not built by CI; build locally with Visual Studio
             - **`Tools/SCLoader.exe`**: Modern CUI-based GUI Shellcode & Payload Loader
             - **`box2d.bin`**: Erin Catto's Box2D 2D Rigid Body Physics Engine Flat Binary
@@ -383,6 +403,7 @@ jobs:
             - **`doom.bin`**: Classic DOOM Game Engine Flat Binary
             - **`doom1.wad`**: DOOM Shareware Game Data IWAD
             - **`imgui_demo.bin`**: Dear ImGui DirectX 11 Immediate-Mode GUI Flat Binary
+            - **`mock_cli.bin`**: Interactive CLI Diagnostic Stub Flat Binary
           files: |
             release_artifacts/clang-plugin-toolchain.zip
             MemLLVM-SDK-windows-x64.zip
@@ -390,6 +411,8 @@ jobs:
             CSLoader-source.zip
             release_artifacts/mimikatz_mllvm.bin
             release_artifacts/sqlite3.bin
+            release_artifacts/winmine.bin
+            release_artifacts/mock_cli.bin
             Tools/SCLoader.exe
             release_artifacts/box2d.bin
             release_artifacts/chip8.bin

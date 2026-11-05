@@ -1,0 +1,111 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test-examples:
+    name: Build & Verify Examples Suite
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Unpack Pinned Plugin-Compatible LLVM Toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = "C:\LLVM-22-plugin"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -Path "release_artifacts/clang-plugin-toolchain.zip" -DestinationPath $dest -Force
+          $cc = Join-Path $dest "bin\clang-cl.exe"
+          if (-not (Test-Path $cc)) { throw "clang-cl.exe missing after unpack" }
+          Add-Content $env:GITHUB_PATH (Join-Path $dest "bin")
+
+      - name: Stage Plugin DLL at bin/
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "bin" -Force | Out-Null
+          Copy-Item "release_artifacts/MemLLVM.dll" "bin/MemLLVM.dll" -Force
+          Write-Host "[+] Staged bin/MemLLVM.dll ($((Get-Item 'bin/MemLLVM.dll').Length) bytes)"
+
+      - name: Build All Flat Binary Examples (Batch Suite)
+        shell: pwsh
+        run: |
+          python examples/build_all.py
+          if ($LASTEXITCODE -ne 0) { throw "build_all.py failed with exit code $LASTEXITCODE" }
+
+      - name: Verify All Example Flat Binaries
+        shell: pwsh
+        run: |
+          $expected = @(
+            "examples/box2d/box2d.bin",
+            "examples/chip8/chip8.bin",
+            "examples/doom/doom.bin",
+            "examples/imgui/imgui_demo.bin",
+            "examples/sqlite/sqlite3.bin",
+            "examples/winmine/winmine.bin",
+            "examples/mock_cli/mock_cli.bin"
+          )
+          foreach ($bin in $expected) {
+            if (-not (Test-Path $bin)) { throw "Required flat binary was not generated: $bin" }
+            $len = (Get-Item $bin).Length
+            Write-Host ("[+] VALID : {0,-32} ({1,8:F2} KB)" -f $bin, ($len / 1024.0))
+          }
+
+  test-mimikatz:
+    name: Build mimikatz Flat Binary
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Unpack Pinned Plugin-Compatible LLVM Toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = "C:\LLVM-22-plugin"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -Path "release_artifacts/clang-plugin-toolchain.zip" -DestinationPath $dest -Force
+          $cc = Join-Path $dest "bin\clang-cl.exe"
+          if (-not (Test-Path $cc)) { throw "clang-cl.exe missing after unpack" }
+          Add-Content $env:GITHUB_PATH (Join-Path $dest "bin")
+
+      - name: Stage Plugin DLL at bin/
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "bin" -Force | Out-Null
+          Copy-Item "release_artifacts/MemLLVM.dll" "bin/MemLLVM.dll" -Force
+
+      - name: Build mimikatz (114 Translation Units)
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          $proj = Join-Path $root "examples\mimikatz"
+          msbuild "examples\mimikatz\mimikatz\mimikatz.vcxproj" `
+            /p:Configuration=Release /p:Platform=x64 `
+            "/p:SolutionDir=$proj\" `
+            "/p:LLVMInstallDir=C:\LLVM-22-plugin" `
+            /p:MemLLVMPython=python `
+            /m /v:m /nologo
+          if ($LASTEXITCODE -ne 0) { throw "msbuild failed with $LASTEXITCODE" }
+
+      - name: Verify mimikatz Flat Binary
+        shell: pwsh
+        run: |
+          $bin = "examples/mimikatz/x64/mimikatz_mllvm.bin"
+          if (-not (Test-Path $bin)) { throw "mimikatz_mllvm.bin was not produced" }
+          $size = (Get-Item $bin).Length
+          Write-Host "[+] mimikatz_mllvm.bin: $size bytes"
+          if ($size -lt 1MB) { throw "Flat binary suspiciously small ($size bytes)" }
