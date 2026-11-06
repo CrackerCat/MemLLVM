@@ -54,7 +54,7 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 |                     |  4. GlobalSectionPass  - 强制合并不连续节区为平坦段     |                 |
 |                     |  5. GlobalPointerPass  - 动态虚表(vtable)基址差值重定位 |                 |
 |                     |  6. AutoLoadLibraryPass- 自动检测并动态注入子系统 DLL   |                 |
-|                     |  7. StackStringPass    - 【即用即解，用完即删】字符串/常量调用点 JIT 局部栈解密与瞬态抹零 |
+|                     |  7. StackStringPass    - 【即用即解，用完即删】函数复合栈缓冲池 (Compound Pool) JIT 瞬态解密与物理抹零 |
 |                     |  8. ApiResolvePass     - 抹除 IAT，会话多态参数化 API 动态哈希 PEB 运行时解析             |
 |                     +---------------------------------------------------------+                 |
 |                                                  |                                              |
@@ -84,7 +84,7 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 | :--- | :--- |
 | **现代 C++20/C++23 语言核心** | 模板元编程、概念（Concepts）、Lambda 闭包、`constexpr`、多层多重虚拟继承与多态虚表（`vtable`）。**Meyers 线程安全单例全面支持**：`StlStubPass` 将隐式 TLS 检查与 `_Init_thread_epoch` 改写为常规内存原子 CAS 指令，彻底斩断对 OS TLS 的依赖。**C++20 协程系统**（`co_await`、`co_return`、`std::coroutine_handle`）实测编译为扁平二进制仅 222 字节。 |
 | **会话多态 API 动态哈希随机化** | **彻底终结固定 ROR13 签名特征**！每个编译会话自动派生或通过 `MEMLLVM_HASH_SEED` 指定独立多态哈希四参数（`Seed`、`ROT`、`MUL`、`XOR`）；`Resolver.c` 与 `ApiResolvePass` 参数化动态注入，消除了包括 `LoadLibraryA` 在内的全部硬编码哈希；`ltl.lib` 静态库通过 `MemLLVM_GetApiAddressByName` 与用户工程会话种子解耦，实现了一次编译、任意工程随用。 |
-| **字符串与常量【即用即解，用完即删】** | **函数级 Scoped JIT 即时解密与物理粉碎**！`StackStringPass` 扫描只读字符串与常量查找表，编译期就地替换为加盐异或密文并剥离常量标记；在函数调用点（`CallBase`/`Invoke`）私有栈帧动态开辟对齐缓冲区，插入内联展开的纳秒级 JIT 快速解密指令流；调用返回后（包括正常流与异常展开分支）立即插入 volatile 强制物理抹零指令（`llvm.memset` 零填充），实现内存即用即解、用完即删，磁盘二进制与函数执行结束后内存中 0 明文残留。 |
+| **字符串与常量【即用即解，用完即删】** | **函数复合栈缓冲池（Compound Stack Pool）与纳秒级物理抹零**！`StackStringPass` 将各函数引用的常量在编译期紧凑打包为该函数专属的独立只读密文池（`@func.str_pool`），并**从 IR 中彻底抹除原始明文字符串变量**；函数被调度进入时，仅在函数入口分配一次复合栈空间并执行一次 `__memllvm_jit_decrypt`，函数体内所有常量通过单条 `lea` 偏移指令零开销寻址；函数退出（`ret`/`resume`）前统一执行一次 `__memllvm_jit_wipe` 强制物理抹零！全模块代码体积膨胀从此前的 +84% 彻底收敛至**仅 +5.2%**，磁盘静态文件与执行结束后内存中 0 字节明文残留。 |
 | **视窗静态资源（`.rsrc`）细粒度加密** | **叶子节点独立随机 Key 加密与瞬态抹除**！提取器（`extract_flat_bin.py`）保留 PE 3 级资源目录树骨架以维持 $O(\log N)$ 零开销目录遍历，对全部叶子物理数据块（位图 DIB、图标字节流、对话框模板、菜单结构、Pascal 变长字串表）按叶子独立分配随机 Key 加密；LTL 运行时（`crt_resources.cpp`）在 `LoadBitmap`、`LoadIcon`、`DialogBoxParam`、`LoadMenu` 等创建系统内核/GDI 句柄后立即调用 `SecureZeroMemory` 物理粉碎临时明文，并配合轻量级句柄缓存，平坦二进制静态数据中杜绝任何明文位图与对话框数据。 |
 | **原生 PE 资源系统（`.rsrc`）** | **无 PE 头部直接原生支持 Win32 资源树**！提取器完整保留 `.rsrc` 物理段，引导桩动态绑定基址，LTL 运行时内置纯内存三级目录树解析引擎，透明接管 `FindResource(Ex)A/W`、`LoadResource`、`LockResource`、`SizeofResource`、`LoadStringA/W`（Pascal 变长字串表）、`DialogBoxParamA/W`、`CreateDialogParamA/W`、`LoadMenuA/W`、`LoadAcceleratorsA/W`、`LoadIconA/W`、`LoadCursorA/W`、`LoadBitmapA/W` 及资源枚举，外部系统模块透明回退。 |
 | **序数导出（`[NONAME]`）寻址** | **全量攻克 Windows 无名序数接口**！内置 Windows 10/11 SDK 全部 80 个核心系统 DLL 的 2,729 个无名序数导出二分检索索引；`ApiResolvePass` 自动改写为 `MemLLVM_GetApiAddressByOrdinal`；自举解析器原生支持递归多级转导链（`DLL.#ordinal` 与 `DLL.func`）及 `<dll>_Ordinal_<ord>` 自定义调用。 |
@@ -277,14 +277,14 @@ examples/
 
 | 旗舰验证项目 | 语言体系与规模 | 扁平镜像体积 | 实战验证的技术能力与亮点 |
 | :--- | :--- | :--- | :--- |
-| **[经典 Win32 扫雷](examples/winmine/)** | 纯 C / Win32 (ReactOS 移植) | **1.01 MB** | **PE 资源系统终极实战验证**：完整打包 `.rsrc` 节，无 PE 头部直接通过内存三级目录树解析 `DialogBoxParamW`（自定义难度与英雄榜模态弹窗）、`LoadMenuW` 菜单、`LoadBitmapW`（经典笑脸/数字/方块贴图）、`LoadIconW` 图标、`LoadAcceleratorsW` 快捷键与 `LoadStringW` 字符串表。 |
-| **[官方 SQLite3 CLI](examples/sqlite/)** | C / SQLite 3.45 | **208 KB** | 官方完整交互式 SQL 终端，内存中建表、查询、索引构建、表格格式化回显、完全支持标准管道读写与交互式键盘录入。 |
-| **[经典 DOOM 引擎](examples/doom/)** | 纯 C (83 个源码文件) | **605 KB** | 经典 DOOM 3D 引擎纯内存光栅化渲染，实时键盘方向控制，纯软件多声道音频混音流，从伴生 `doom1.wad` 实时流式读取游戏资产。 |
-| **[Dear ImGui v1.91+](examples/imgui/)** | C++17 工业级 UI | **813 KB** | 完整即时模式图形界面、多窗口停靠系统（Docking）、图表、样式编辑器，完全通过**硬件加速的 DirectX 11 / DXGI** 管线渲染。 |
-| **[Box2D 3.0 物理引擎](examples/box2d/)** | 纯 C (45 个源码文件) | **545 KB** | 连续刚体碰撞模拟、四叉树/动态 BVH 粗筛、冲量积分约束求解器、原生 Win32 GDI 矢量线框实时矢量渲染。 |
-| **[CHIP-8 虚拟机](examples/chip8/)** | 现代 C++20 | **30 KB** | 35 条 CPU 机器指令仿真器、帧定时器、蜂鸣音效、64x32 单色点阵显存，稳定流畅运行经典游戏。 |
+| **[经典 Win32 扫雷](examples/winmine/)** | 纯 C / Win32 (ReactOS 移植) | **1.02 MB** (1047 KB) | **PE 资源与常量双重加密实战验证**：完整打包细粒度叶子独立加密的 `.rsrc` 节，无 PE 头部直接通过内存三级目录树解析 `DialogBoxParamW`（自定义难度与英雄榜模态弹窗）、`LoadMenuW` 菜单、`LoadBitmapW`（经典笑脸/数字贴图）、`LoadIconW` 图标、`LoadAcceleratorsW` 快捷键与 `LoadStringW` 字符串表，创建句柄后立即物理抹零。 |
+| **[官方 SQLite3 CLI](examples/sqlite/)** | C / SQLite 3.45 | **219 KB** (净增仅 5.8%) | 官方完整交互式 SQL 终端，内存中建表、查询、索引构建、表格格式化回显、完全支持标准管道读写与交互式键盘录入。 |
+| **[经典 DOOM 引擎](examples/doom/)** | 纯 C (83 个源码文件) | **645 KB** (净增仅 5.1%) | 经典 DOOM 3D 引擎纯内存光栅化渲染，实时键盘方向控制，纯软件多声道音频混音流，从伴生 `doom1.wad` 实时流式读取游戏资产。 |
+| **[Dear ImGui v1.91+](examples/imgui/)** | C++17 工业级 UI | **911 KB** (瘦身超 600 KB) | 完整即时模式图形界面、多窗口停靠系统（Docking）、图表、样式编辑器，完全通过**硬件加速的 DirectX 11 / DXGI** 管线渲染，全量加密 3,261 个字符串。 |
+| **[Box2D 3.0 物理引擎](examples/box2d/)** | 纯 C (45 个源码文件) | **571 KB** (净增仅 3.1%) | 连续刚体碰撞模拟、四叉树/动态 BVH 粗筛、冲量积分约束求解器、原生 Win32 GDI 矢量线框实时矢量渲染。 |
+| **[CHIP-8 虚拟机](examples/chip8/)** | 现代 C++20 | **50 KB** | 35 条 CPU 机器指令仿真器、帧定时器、蜂鸣音效、64x32 单色点阵显存，稳定流畅运行经典游戏。 |
 | **[Mimikatz 2.2.0](examples/mimikatz/)** | 复杂工程级 C (114 个编译单元) | **1.20 MB** | 百级 TU 大规模复杂 C 工程，验证跨模块全局符号 Tentative Definition 合并、动态子系统导入消除、多层结构体内存排布及双 CRT 管道接管。 |
-| **[Mock CLI 诊断桩](examples/mock_cli/)** | 精炼 C 运行时 | **4.6 KB** | 专为诊断和验证控制台管道设计，覆盖全双工标准输入输出流转、命令行参数透传、高频回显吞吐与平稳优雅退出。 |
+| **[Mock CLI 诊断桩](examples/mock_cli/)** | 精炼 C 运行时 | **5.6 KB** | 专为诊断和验证控制台管道设计，覆盖全双工标准输入输出流转、命令行参数透传、高频回显吞吐与平稳优雅退出。 |
 
 > 💡 **本地一键批处理构建全量样例**：在根目录下执行 `python examples/build_all.py`，即可在约 15 秒内全量编译并提取全部 7 个独立二进制产物！
 
@@ -363,6 +363,19 @@ python "%MEMLLVM_DIR%\Tools\extract_flat_bin.py" main.exe main.bin
    ```
 
 编译完成后，同级目录会直接生成绝对位置无关的 `.bin`，使用自带的 `SCLoader.exe` 或 `scloader_cli.exe` 即可一键运行！
+
+---
+
+## ⚙️ 编译配置与高级环境变量参数（Optional Configuration & Security Tiers）
+
+MemLLVM 提供了一套灵活的编译期环境变量与配置控制项，可在零修改源码的前提下自由调整安全等级、多态种子与调试诊断输出：
+
+| 环境变量 / 配置项 | 可选值 | 默认值 | 详细功能说明与效果 |
+| :--- | :---: | :---: | :--- |
+| **`MEMLLVM_STRING_ENCRYPT`** | `1` / `2` / `0` | **`1`** (推荐) | **字符串与常量 JIT 栈加密强度档位**：<br>• **`1` (智能复合池模式，默认推荐)**：启用【函数复合栈缓冲池 (Compound Stack Pool)】。将每个函数引用的所有常量合并为单个紧凑密文池，函数入口仅执行一次 JIT 解密，函数退出立即物理抹零。智能跳过无保密意义的极短字符（$\le 2$ 字节），全模块体积膨胀收敛至 **仅 +5.2%**。<br>• **`2` (激进全量模式)**：强制加密包括 `""`、`"\n"`、`" "` 在内的 100% 全部常量与字符串，确保磁盘与静态数据中无任何明文字节。<br>• **`0` (禁用模式)**：完全旁路 `StackStringPass`，保留原始只读数据段布局。 |
+| **`MEMLLVM_HASH_SEED`** | `0x<hex>` / `<int>` | **自动随机** | **API 多态哈希编译期随机种子**：<br>• 显式指定固定的 32 位种子（例如 `0x12345678`），便于多团队或多编译单元（Multi-TU）工程锁定特征；<br>• 若未设置，系统自动基于**当前工程根目录绝对路径 + 编译会话时间戳硬件熵源**派生独立高熵种子，并联动生成配套的多态参数（旋转步长 ROT、乘数 MUL、异或掩码 XOR），彻底终结固定 ROR13 彩虹表逆向。 |
+| **`MEMLLVM_VERBOSE`** | `1` / `0` | `0` | **编译期详细诊断日志输出**：<br>• 设为 `1` 时，Clang-cl 编译时将在终端详细打印受保护的字符串常量总数、生成的复合缓冲池数量、API 动态解析统计与自动注入的依赖 DLL 详情。 |
+| **`MEMLLVM_DISABLE_AUTO_LOADLIBRARY`** | `1` / `0` | `0` | **动态依赖注入控制**：<br>• 设为 `1` 时，禁用 `AutoLoadLibraryPass` 在入口点自动注入 `LoadLibraryA("<dll>")` 的行为（适用于自主完全掌控 DLL 加载生命周期的裸内核级环境）。 |
 
 ---
 
