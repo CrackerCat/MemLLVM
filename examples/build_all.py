@@ -11,7 +11,7 @@ EXAMPLES = [
     ("Box2D 2D Physics Engine", ["python", os.path.join(SCRIPT_DIR, "box2d", "build_box2d.py")], os.path.join(SCRIPT_DIR, "box2d", "box2d.bin")),
     ("CHIP-8 Virtual Machine", ["python", os.path.join(SCRIPT_DIR, "chip8", "build_chip8.py")], os.path.join(SCRIPT_DIR, "chip8", "chip8.bin")),
     ("Classic DOOM Game Engine", ["python", os.path.join(SCRIPT_DIR, "doom", "build_doom.py")], os.path.join(SCRIPT_DIR, "doom", "doom.bin")),
-    ("Dear ImGui DirectX 11 Demo", ["cmd", "/c", os.path.join(SCRIPT_DIR, "imgui", "build_imgui_demo.bat")], os.path.join(SCRIPT_DIR, "imgui", "imgui_demo.bin")),
+    ("Dear ImGui DirectX 11 Demo", [os.environ.get("COMSPEC", "cmd.exe"), "/c", os.path.join(SCRIPT_DIR, "imgui", "build_imgui_demo.bat")], os.path.join(SCRIPT_DIR, "imgui", "imgui_demo.bin")),
     ("Official SQLite3 CLI Shell", ["python", os.path.join(SCRIPT_DIR, "sqlite", "build_sqlite.py")], os.path.join(SCRIPT_DIR, "sqlite", "sqlite3.bin")),
     ("WinMine Classic Win32 Game", ["python", os.path.join(SCRIPT_DIR, "winmine", "build_winmine.py")], os.path.join(SCRIPT_DIR, "winmine", "winmine.bin")),
     ("Mock CLI Diagnostic Stub", ["python", os.path.join(SCRIPT_DIR, "mock_cli", "build_mock_cli.py")], os.path.join(SCRIPT_DIR, "mock_cli", "mock_cli.bin"))
