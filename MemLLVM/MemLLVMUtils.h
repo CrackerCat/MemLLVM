@@ -8,6 +8,20 @@
 
 namespace memllvm {
 
+struct HashConfig {
+  uint32_t Seed = 0;
+  uint32_t Rot = 13;
+  uint32_t Mul = 1;
+  uint32_t Xor = 0;
+
+  uint32_t hash(llvm::StringRef str) const;
+  uint32_t hashWideLower(llvm::StringRef str) const;
+};
+
+const HashConfig &getGlobalHashConfig();
+uint32_t calculateDynamicHash(llvm::StringRef str);
+uint32_t calculateDynamicDllHash(llvm::StringRef dllStr);
+
 uint32_t calculateRor13(llvm::StringRef str);
 llvm::Function *findOrSynthesizeEntryPoint(llvm::Module &M);
 

@@ -18,6 +18,7 @@
 #include "llvm/Linker/Linker.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 
 #include <set>
 #include <utility>
@@ -37,14 +38,18 @@ static bool shouldResolveCallee(const CallBase &CB, Function *Callee) {
   return Callee && Callee->isDeclaration() && !Callee->isIntrinsic() &&
          !Callee->getName().starts_with("llvm.") &&
          Callee->getName() != "MemLLVM_GetApiAddress" &&
+         Callee->getName() != "MemLLVM_GetApiAddressByName" &&
          !isStaticShimSymbol(Callee->getName()) &&
          isKnownWindowsApi(Callee->getName());
 }
 
-// Dynamic API name hashing using ROR13. Forwarders and exports are dynamically
-// discovered and resolved at runtime by Resolver.c without brittle static remapping tables.
+// Dynamic API name hashing using randomized session hash parameters.
 static uint32_t getApiHash(StringRef ApiName) {
-  return calculateRor13(ApiName);
+  return calculateDynamicHash(ApiName);
+}
+
+static uint32_t getDllHash(StringRef DllName) {
+  return calculateDynamicDllHash(DllName);
 }
 
 // True when \p F is a known Win32 declaration referenced by something other
@@ -57,6 +62,7 @@ static bool hasAddressTakenApiUse(Function &F) {
     return false;
   if (F.getName().starts_with("llvm.") ||
       F.getName() == "MemLLVM_GetApiAddress" ||
+      F.getName() == "MemLLVM_GetApiAddressByName" ||
       isStaticShimSymbol(F.getName()) || !isKnownWindowsApi(F.getName()))
     return false;
   for (Use &U : F.uses()) {
@@ -89,6 +95,7 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
         F.getName() == "MemLLVM_GetApiAddress" ||
         F.getName() == "MemLLVM_GetApiAddressByOrdinal" ||
         F.getName() == "MemLLVM_GetProcAddress" ||
+        F.getName() == "MemLLVM_GetApiAddressByName" ||
         isStaticShimSymbol(F.getName()) || !isKnownWindowsApi(F.getName()))
       continue;
     HasCallsToResolve = true;
@@ -111,77 +118,139 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     }
   }
 
-  if (!HasCallsToResolve) {
+  bool IsLtlModule = (getenv("MEMLLVM_BUILDING_LTL") != nullptr);
+  if (!IsLtlModule) {
+    StringRef ModName = M.getName();
+    StringRef SrcName = M.getSourceFileName();
+    if (ModName.contains("ltl") || ModName.contains("LTL") ||
+        SrcName.contains("ltl") || SrcName.contains("LTL")) {
+      IsLtlModule = true;
+    }
+  }
+
+  Function *EntryFn = findOrSynthesizeEntryPoint(M);
+  bool HasEntry = (EntryFn && !EntryFn->empty());
+
+  if (!HasCallsToResolve && !HasEntry) {
     // Even with no call sites, GlobalPointerPass may have inserted resolver
     // calls for address-taken APIs (see below), so fall through and link it.
     Function *Existing = M.getFunction("MemLLVM_GetApiAddress");
     Function *ExistingOrd = M.getFunction("MemLLVM_GetApiAddressByOrdinal");
-    if ((!Existing || Existing->use_empty()) && (!ExistingOrd || ExistingOrd->use_empty())) {
+    Function *ExistingName = M.getFunction("MemLLVM_GetApiAddressByName");
+    if ((!Existing || Existing->use_empty()) &&
+        (!ExistingOrd || ExistingOrd->use_empty()) &&
+        (!ExistingName || ExistingName->use_empty())) {
       if (getenv("MEMLLVM_VERBOSE")) {
         errs() << "[MemLLVM] No external Windows API calls found in module.\n";
       }
-      findOrSynthesizeEntryPoint(M);
       return PreservedAnalyses::all();
     }
   }
 
   // 2. Ensure MemLLVM_GetApiAddress is linked into M BEFORE collecting instruction pointers
-  //
-  // The function may already exist as a bare *declaration* when
-  // GlobalPointerPass ran first and recorded address-taken Win32 APIs
-  // (function-pointer tables such as sqlite3's aSyscall). Checking only for
-  // null would treat that declaration as "already linked" and leave the body
-  // missing, which surfaces as an undefined symbol at link time.
-  Function *ResolverFn = M.getFunction("MemLLVM_GetApiAddress");
-  if (!ResolverFn || ResolverFn->isDeclaration()) {
-    auto OldDH = M.getContext().getDiagnosticHandler();
-
-    StringRef BCData(reinterpret_cast<const char *>(ResolverBitcode), ResolverBitcodeSize);
-    MemoryBufferRef MemBuf(BCData, "Resolver.bc");
-    Expected<std::unique_ptr<Module>> ResMOrErr = parseBitcodeFile(MemBuf, M.getContext());
-    if (!ResMOrErr) {
-      M.getContext().setDiagnosticHandler(std::move(OldDH));
-      errs() << "[MemLLVM] Failed to parse Resolver bitcode: " 
-             << toString(ResMOrErr.takeError()) << "\n";
-      return PreservedAnalyses::all();
-    }
-
-    std::unique_ptr<Module> ResM = std::move(*ResMOrErr);
-    ResM->setDataLayout(M.getDataLayout());
-    ResM->setTargetTriple(M.getTargetTriple());
-
-    if (Linker::linkModules(M, std::move(ResM))) {
-      M.getContext().setDiagnosticHandler(std::move(OldDH));
-      errs() << "[MemLLVM] Failed to link Resolver into module\n";
-      return PreservedAnalyses::all();
-    }
-
-    M.getContext().setDiagnosticHandler(std::move(OldDH));
-
+  Function *ResolverFn = nullptr;
+  if (!IsLtlModule) {
     ResolverFn = M.getFunction("MemLLVM_GetApiAddress");
-    if (!ResolverFn) {
-      errs() << "[MemLLVM] Error: MemLLVM_GetApiAddress not found after linking!\n";
-      return PreservedAnalyses::all();
-    }
+    if (!ResolverFn || ResolverFn->isDeclaration()) {
+      auto OldDH = M.getContext().getDiagnosticHandler();
 
-    Comdat *C = M.getOrInsertComdat("MemLLVM_GetApiAddress");
-    C->setSelectionKind(Comdat::Any);
-    ResolverFn->setComdat(C);
-    ResolverFn->setLinkage(GlobalValue::LinkOnceODRLinkage);
+      StringRef BCData(reinterpret_cast<const char *>(ResolverBitcode), ResolverBitcodeSize);
+      MemoryBufferRef MemBuf(BCData, "Resolver.bc");
+      Expected<std::unique_ptr<Module>> ResMOrErr = parseBitcodeFile(MemBuf, M.getContext());
+      if (!ResMOrErr) {
+        M.getContext().setDiagnosticHandler(std::move(OldDH));
+        errs() << "[MemLLVM] Failed to parse Resolver bitcode: " 
+               << toString(ResMOrErr.takeError()) << "\n";
+        return PreservedAnalyses::all();
+      }
 
-    if (Function *OrdFn = M.getFunction("MemLLVM_GetApiAddressByOrdinal")) {
-      Comdat *COrd = M.getOrInsertComdat("MemLLVM_GetApiAddressByOrdinal");
-      COrd->setSelectionKind(Comdat::Any);
-      OrdFn->setComdat(COrd);
-      OrdFn->setLinkage(GlobalValue::LinkOnceODRLinkage);
+      std::unique_ptr<Module> ResM = std::move(*ResMOrErr);
+      ResM->setDataLayout(M.getDataLayout());
+      ResM->setTargetTriple(M.getTargetTriple());
+
+      if (Linker::linkModules(M, std::move(ResM))) {
+        M.getContext().setDiagnosticHandler(std::move(OldDH));
+        errs() << "[MemLLVM] Failed to link Resolver into module\n";
+        return PreservedAnalyses::all();
+      }
+
+      M.getContext().setDiagnosticHandler(std::move(OldDH));
+
+      ResolverFn = M.getFunction("MemLLVM_GetApiAddress");
+      if (!ResolverFn) {
+        errs() << "[MemLLVM] Error: MemLLVM_GetApiAddress not found after linking!\n";
+        return PreservedAnalyses::all();
+      }
+
+      SmallVector<GlobalValue *, 4> ExportedFns;
+      ExportedFns.push_back(ResolverFn);
+
+      Comdat *C = M.getOrInsertComdat("MemLLVM_GetApiAddress");
+      C->setSelectionKind(Comdat::Any);
+      ResolverFn->setComdat(C);
+      ResolverFn->setLinkage(GlobalValue::WeakODRLinkage);
+
+      if (Function *OrdFn = M.getFunction("MemLLVM_GetApiAddressByOrdinal")) {
+        Comdat *COrd = M.getOrInsertComdat("MemLLVM_GetApiAddressByOrdinal");
+        COrd->setSelectionKind(Comdat::Any);
+        OrdFn->setComdat(COrd);
+        OrdFn->setLinkage(GlobalValue::WeakODRLinkage);
+        ExportedFns.push_back(OrdFn);
+      }
+      if (Function *GpaFn = M.getFunction("MemLLVM_GetProcAddress")) {
+        Comdat *CGpa = M.getOrInsertComdat("MemLLVM_GetProcAddress");
+        CGpa->setSelectionKind(Comdat::Any);
+        GpaFn->setComdat(CGpa);
+        GpaFn->setLinkage(GlobalValue::WeakODRLinkage);
+        ExportedFns.push_back(GpaFn);
+      }
+      if (Function *NameFn = M.getFunction("MemLLVM_GetApiAddressByName")) {
+        Comdat *CName = M.getOrInsertComdat("MemLLVM_GetApiAddressByName");
+        CName->setSelectionKind(Comdat::Any);
+        NameFn->setComdat(CName);
+        NameFn->setLinkage(GlobalValue::WeakODRLinkage);
+        ExportedFns.push_back(NameFn);
+      }
+
+      appendToCompilerUsed(M, ExportedFns);
+
+      // Dynamic Parameter Injection: patch Resolver constants with randomized session params
+      const HashConfig &HC = getGlobalHashConfig();
+      uint32_t LoadLibHash = HC.hash("LoadLibraryA");
+
+      auto patchGlobalParam = [&](const char *Name, uint32_t Val) {
+        if (GlobalVariable *GV = M.getGlobalVariable(Name)) {
+          GV->setInitializer(ConstantInt::get(Type::getInt32Ty(M.getContext()), Val));
+          GV->setConstant(true);
+          GV->setLinkage(GlobalValue::InternalLinkage);
+
+          SmallVector<User *, 16> Users(GV->users());
+          for (User *U : Users) {
+            if (auto *LI = dyn_cast<LoadInst>(U)) {
+              LI->replaceAllUsesWith(ConstantInt::get(Type::getInt32Ty(M.getContext()), Val));
+              LI->eraseFromParent();
+            }
+          }
+        }
+      };
+
+      patchGlobalParam("g_memllvm_hash_seed", HC.Seed);
+      patchGlobalParam("g_memllvm_hash_rot", HC.Rot);
+      patchGlobalParam("g_memllvm_hash_mul", HC.Mul);
+      patchGlobalParam("g_memllvm_hash_xor", HC.Xor);
+      patchGlobalParam("g_memllvm_hash_loadlibrarya", LoadLibHash);
     }
-    if (Function *GpaFn = M.getFunction("MemLLVM_GetProcAddress")) {
-      Comdat *CGpa = M.getOrInsertComdat("MemLLVM_GetProcAddress");
-      CGpa->setSelectionKind(Comdat::Any);
-      GpaFn->setComdat(CGpa);
-      GpaFn->setLinkage(GlobalValue::LinkOnceODRLinkage);
-    }
+  } else {
+    ResolverFn = cast<Function>(M.getOrInsertFunction(
+        "MemLLVM_GetApiAddress",
+        FunctionType::get(PointerType::get(M.getContext(), 0),
+                          {Type::getInt32Ty(M.getContext())}, false)).getCallee());
   }
+
+  FunctionCallee ResolverByNameFn = M.getOrInsertFunction(
+      "MemLLVM_GetApiAddressByName",
+      FunctionType::get(PointerType::get(M.getContext(), 0),
+                        {PointerType::get(M.getContext(), 0)}, false));
 
   FunctionCallee ResolverByOrdinalFn = M.getOrInsertFunction(
       "MemLLVM_GetApiAddressByOrdinal",
@@ -201,6 +270,7 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
         F.getName() == "MemLLVM_GetApiAddress" ||
         F.getName() == "MemLLVM_GetApiAddressByOrdinal" ||
         F.getName() == "MemLLVM_GetProcAddress" ||
+        F.getName() == "MemLLVM_GetApiAddressByName" ||
         isStaticShimSymbol(F.getName()) || !isKnownWindowsApi(F.getName()))
       continue;
 
@@ -247,7 +317,7 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
         errs() << "[MemLLVM] (" << (idx + 1) << "/" << CallsToResolve.size()
                << ") Rewriting " << (isa<InvokeInst>(CB) ? "invoke" : "call")
                << " to external API: " << ApiName
-               << " (ROR13: 0x" << Twine::utohexstr(ApiHash) << ") in function: "
+               << " (Hash: 0x" << Twine::utohexstr(ApiHash) << ") in function: "
                << (CB->getFunction() ? CB->getFunction()->getName() : "<none>") << "\n";
       }
     }
@@ -259,8 +329,11 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
       Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, CB->getFunction()->getSubprogram()));
     }
     Value *RawFuncPtr = nullptr;
-    if (IsOrdinal) {
-      uint32_t DllHash = OrdDll.empty() ? 0 : calculateRor13(OrdDll);
+    if (IsLtlModule) {
+      Constant *ApiStr = Builder.CreateGlobalString(ApiName, ApiName + ".str");
+      RawFuncPtr = Builder.CreateCall(ResolverByNameFn, {ApiStr}, "api_ptr");
+    } else if (IsOrdinal) {
+      uint32_t DllHash = OrdDll.empty() ? 0 : getDllHash(OrdDll);
       RawFuncPtr = Builder.CreateCall(
           ResolverByOrdinalFn,
           {Builder.getInt32(DllHash), Builder.getInt32(Ordinal)},
@@ -300,8 +373,11 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
       } else if (User->getFunction() && User->getFunction()->getSubprogram()) {
         Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, User->getFunction()->getSubprogram()));
       }
-      if (IsOrdinal) {
-        uint32_t DllHash = OrdDll.empty() ? 0 : calculateRor13(OrdDll);
+      if (IsLtlModule) {
+        Constant *ApiStr = Builder.CreateGlobalString(F->getName(), F->getName() + ".str");
+        FnPtr = Builder.CreateCall(ResolverByNameFn, {ApiStr}, F->getName() + ".addr");
+      } else if (IsOrdinal) {
+        uint32_t DllHash = OrdDll.empty() ? 0 : getDllHash(OrdDll);
         FnPtr = Builder.CreateCall(
             ResolverByOrdinalFn,
             {Builder.getInt32(DllHash), Builder.getInt32(Ordinal)},
@@ -317,8 +393,11 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
       } else if (User->getFunction() && User->getFunction()->getSubprogram()) {
         Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, User->getFunction()->getSubprogram()));
       }
-      if (IsOrdinal) {
-        uint32_t DllHash = OrdDll.empty() ? 0 : calculateRor13(OrdDll);
+      if (IsLtlModule) {
+        Constant *ApiStr = Builder.CreateGlobalString(F->getName(), F->getName() + ".str");
+        FnPtr = Builder.CreateCall(ResolverByNameFn, {ApiStr}, F->getName() + ".addr");
+      } else if (IsOrdinal) {
+        uint32_t DllHash = OrdDll.empty() ? 0 : getDllHash(OrdDll);
         FnPtr = Builder.CreateCall(
             ResolverByOrdinalFn,
             {Builder.getInt32(DllHash), Builder.getInt32(Ordinal)},
@@ -408,8 +487,14 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
       Builder.SetCurrentDebugLocation(DILocation::get(M.getContext(), 0, 0, LI->getFunction()->getSubprogram()));
     }
     Value *FnPtr = nullptr;
-    if (IsOrdinal) {
-      uint32_t DllHash = OrdDll.empty() ? 0 : calculateRor13(OrdDll);
+    if (IsLtlModule) {
+      Constant *ApiStr = Builder.CreateGlobalString(Api, Api + ".str");
+      FnPtr = Builder.CreateCall(ResolverByNameFn, {ApiStr}, Api + ".imp");
+      if (Verbose) {
+        errs() << "[MemLLVM]   __imp_" << Api << " -> name resolver(\"" << Api << "\")\n";
+      }
+    } else if (IsOrdinal) {
+      uint32_t DllHash = OrdDll.empty() ? 0 : getDllHash(OrdDll);
       FnPtr = Builder.CreateCall(
           ResolverByOrdinalFn,
           {Builder.getInt32(DllHash), Builder.getInt32(Ordinal)},
@@ -436,7 +521,7 @@ PreservedAnalyses ApiResolvePass::run(Module &M, ModuleAnalysisManager &MAM) {
     if (F.isDeclaration() && !F.isIntrinsic() &&
         !isStaticShimSymbol(F.getName()) &&
         !F.getName().starts_with("llvm.") &&
-        F.getName() != "MemLLVM_GetApiAddress" &&
+        !F.getName().starts_with("MemLLVM_") &&
         F.hasNUsesOrMore(1)) {
       errs() << "[MemLLVM] WARNING: Unresolved external import remains: @"
              << F.getName() << " (" << F.getNumUses() << " use(s))\n";

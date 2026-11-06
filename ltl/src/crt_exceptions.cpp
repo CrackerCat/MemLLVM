@@ -34,18 +34,9 @@ __declspec(dllexport) volatile MemLLVM_PDataInfo g_memllvm_pdata_info = {
 // Fallback image base
 uintptr_t g_memllvm_image_base = 0;
 
-// Symbol resolver from Resolver.c
-void* MemLLVM_GetApiAddress(uint32_t ror13_hash);
-
-// ROR13 API Hashes
-#define HASH_LOADLIBRARYA           0xEC0E4E8E
-#define HASH_RTLADDFUNCTIONTABLE    0x22FC1661
-#define HASH_RTLDELETEFUNCTIONTABLE 0xE0262DF4
-#define HASH_RAISEEXCEPTION         0x9BE0580E
-#define HASH_VIRTUALQUERY           0xA3C8C8AA
-#define HASH_CXXFRAMEHANDLER3       0x1F62B224
-#define HASH_CXXFRAMEHANDLER4       0x1F62B225
-#define HASH_CSPECIFICHANDLER       0xDB45D5F3
+// Symbol resolvers from Resolver.c
+void* MemLLVM_GetApiAddress(uint32_t hash);
+void* MemLLVM_GetApiAddressByName(const char* name);
 
 typedef int (*PFN_CxxFrameHandler)(void*, void*, void*, void*);
 typedef int (__stdcall *PFN_RtlAddFunctionTable)(void*, uint32_t, uintptr_t);
@@ -71,7 +62,7 @@ static PFN_CxxFrameHandler s_pfnCSpec = nullptr;
 static bool s_eh_registered = false;
 
 static void EnsureMsvcrt() {
-    PFN_LoadLibraryA pLoad = (PFN_LoadLibraryA)MemLLVM_GetApiAddress(HASH_LOADLIBRARYA);
+    PFN_LoadLibraryA pLoad = (PFN_LoadLibraryA)MemLLVM_GetApiAddressByName("LoadLibraryA");
     if (pLoad) {
         pLoad("msvcrt.dll");
     }
@@ -83,7 +74,7 @@ void MemLLVM_InitExceptions(void) {
     s_eh_registered = true;
 
     if (g_memllvm_pdata_info.pdata_count > 0 && g_memllvm_pdata_info.pdata_ptr) {
-        PFN_RtlAddFunctionTable pAdd = (PFN_RtlAddFunctionTable)MemLLVM_GetApiAddress(HASH_RTLADDFUNCTIONTABLE);
+        PFN_RtlAddFunctionTable pAdd = (PFN_RtlAddFunctionTable)MemLLVM_GetApiAddressByName("RtlAddFunctionTable");
         if (pAdd) {
             uintptr_t base = (uintptr_t)g_memllvm_pdata_info.image_base;
             pAdd(g_memllvm_pdata_info.pdata_ptr, g_memllvm_pdata_info.pdata_count, base);
@@ -94,7 +85,7 @@ void MemLLVM_InitExceptions(void) {
 // Clean up function table on process / module exit
 void MemLLVM_CleanupExceptions(void) {
     if (s_eh_registered && g_memllvm_pdata_info.pdata_ptr) {
-        PFN_RtlDeleteFunctionTable pDel = (PFN_RtlDeleteFunctionTable)MemLLVM_GetApiAddress(HASH_RTLDELETEFUNCTIONTABLE);
+        PFN_RtlDeleteFunctionTable pDel = (PFN_RtlDeleteFunctionTable)MemLLVM_GetApiAddressByName("RtlDeleteFunctionTable");
         if (pDel) {
             pDel(g_memllvm_pdata_info.pdata_ptr);
         }
@@ -114,7 +105,7 @@ static uintptr_t ResolveImageBase(const void* ptr) {
     if (g_memllvm_image_base) {
         return g_memllvm_image_base;
     }
-    PFN_VirtualQuery pVQ = (PFN_VirtualQuery)MemLLVM_GetApiAddress(HASH_VIRTUALQUERY);
+    PFN_VirtualQuery pVQ = (PFN_VirtualQuery)MemLLVM_GetApiAddressByName("VirtualQuery");
     if (pVQ) {
         MEMORY_BASIC_INFORMATION_LOCAL mbi = { 0 };
         if (pVQ(ptr, &mbi, sizeof(mbi))) {
@@ -131,10 +122,10 @@ static uintptr_t ResolveImageBase(const void* ptr) {
 int __CxxFrameHandler3(void* ExceptionRecord, void* EstablisherFrame, void* ContextRecord, void* DispatcherContext) {
     MemLLVM_InitExceptions();
     if (!s_pfnCxx3) {
-        s_pfnCxx3 = (PFN_CxxFrameHandler)MemLLVM_GetApiAddress(HASH_CXXFRAMEHANDLER3);
+        s_pfnCxx3 = (PFN_CxxFrameHandler)MemLLVM_GetApiAddressByName("__CxxFrameHandler3");
         if (!s_pfnCxx3) {
             EnsureMsvcrt();
-            s_pfnCxx3 = (PFN_CxxFrameHandler)MemLLVM_GetApiAddress(HASH_CXXFRAMEHANDLER3);
+            s_pfnCxx3 = (PFN_CxxFrameHandler)MemLLVM_GetApiAddressByName("__CxxFrameHandler3");
         }
     }
     if (s_pfnCxx3) {
@@ -146,10 +137,10 @@ int __CxxFrameHandler3(void* ExceptionRecord, void* EstablisherFrame, void* Cont
 int __CxxFrameHandler4(void* ExceptionRecord, void* EstablisherFrame, void* ContextRecord, void* DispatcherContext) {
     MemLLVM_InitExceptions();
     if (!s_pfnCxx4) {
-        s_pfnCxx4 = (PFN_CxxFrameHandler)MemLLVM_GetApiAddress(HASH_CXXFRAMEHANDLER4);
+        s_pfnCxx4 = (PFN_CxxFrameHandler)MemLLVM_GetApiAddressByName("__CxxFrameHandler4");
         if (!s_pfnCxx4) {
             EnsureMsvcrt();
-            s_pfnCxx4 = (PFN_CxxFrameHandler)MemLLVM_GetApiAddress(HASH_CXXFRAMEHANDLER4);
+            s_pfnCxx4 = (PFN_CxxFrameHandler)MemLLVM_GetApiAddressByName("__CxxFrameHandler4");
         }
     }
     if (s_pfnCxx4) {
@@ -161,10 +152,10 @@ int __CxxFrameHandler4(void* ExceptionRecord, void* EstablisherFrame, void* Cont
 int __C_specific_handler(void* ExceptionRecord, void* EstablisherFrame, void* ContextRecord, void* DispatcherContext) {
     MemLLVM_InitExceptions();
     if (!s_pfnCSpec) {
-        s_pfnCSpec = (PFN_CxxFrameHandler)MemLLVM_GetApiAddress(HASH_CSPECIFICHANDLER);
+        s_pfnCSpec = (PFN_CxxFrameHandler)MemLLVM_GetApiAddressByName("__C_specific_handler");
         if (!s_pfnCSpec) {
             EnsureMsvcrt();
-            s_pfnCSpec = (PFN_CxxFrameHandler)MemLLVM_GetApiAddress(HASH_CSPECIFICHANDLER);
+            s_pfnCSpec = (PFN_CxxFrameHandler)MemLLVM_GetApiAddressByName("__C_specific_handler");
         }
     }
     if (s_pfnCSpec) {
@@ -178,7 +169,7 @@ int __C_specific_handler(void* ExceptionRecord, void* EstablisherFrame, void* Co
 //
 void __stdcall _CxxThrowException(void* pExceptionObject, void* pThrowInfo) {
     MemLLVM_InitExceptions();
-    PFN_RaiseException pRaise = (PFN_RaiseException)MemLLVM_GetApiAddress(HASH_RAISEEXCEPTION);
+    PFN_RaiseException pRaise = (PFN_RaiseException)MemLLVM_GetApiAddressByName("RaiseException");
     if (!pRaise) return;
 
     if (!pExceptionObject) {

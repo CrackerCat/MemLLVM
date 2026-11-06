@@ -100,19 +100,17 @@ PreservedAnalyses GlobalPointerPass::run(Module &M, ModuleAnalysisManager &MAM) 
         if (auto *F = dyn_cast<Function>(C->stripPointerCasts())) {
           if (F->isDeclaration() && !F->isIntrinsic() &&
               !F->getName().starts_with("llvm.") &&
-              F->getName() != "MemLLVM_GetApiAddress" &&
-              F->getName() != "MemLLVM_GetApiAddressByOrdinal" &&
-              F->getName() != "MemLLVM_GetProcAddress" &&
+              !F->getName().starts_with("MemLLVM_") &&
               !isStaticShimSymbol(F->getName()) &&
               isKnownWindowsApi(F->getName())) {
             std::string OwningDll;
             uint32_t Ordinal = 0;
             if (probeOrdinalForApi(F->getName(), OwningDll, Ordinal)) {
               Entry.DynamicOrdinal = Ordinal;
-              Entry.DynamicDllHash = calculateRor13(OwningDll);
+              Entry.DynamicDllHash = calculateDynamicDllHash(OwningDll);
               Entry.DynamicName = F->getName().str();
             } else {
-              Entry.DynamicHash = calculateRor13(F->getName());
+              Entry.DynamicHash = calculateDynamicHash(F->getName());
               Entry.DynamicName = F->getName().str();
             }
           }

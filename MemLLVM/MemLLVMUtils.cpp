@@ -1,5 +1,6 @@
 #include "MemLLVMUtils.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -8,11 +9,141 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <random>
 #include <string>
 
 using namespace llvm;
 
 namespace memllvm {
+
+uint32_t HashConfig::hash(StringRef str) const {
+  uint32_t h = Seed;
+  for (unsigned char c : str) {
+    h = (h >> Rot) | (h << (32 - Rot));
+    h += ((uint32_t)c * Mul) ^ Xor;
+  }
+  return h;
+}
+
+uint32_t HashConfig::hashWideLower(StringRef str) const {
+  uint32_t h = Seed;
+  for (char c : str) {
+    uint32_t lower_c = (unsigned char)c;
+    if (lower_c >= 'A' && lower_c <= 'Z') lower_c += ('a' - 'A');
+    h = (h >> Rot) | (h << (32 - Rot));
+    h += (lower_c * Mul) ^ Xor;
+  }
+  return h;
+}
+
+const HashConfig &getGlobalHashConfig() {
+  static HashConfig Config = []() {
+    HashConfig Cfg;
+
+    // 1. Check MEMLLVM_HASH_SEED environment variable
+    if (const char *EnvSeed = getenv("MEMLLVM_HASH_SEED")) {
+      StringRef S(EnvSeed);
+      uint32_t Val = 0;
+      if (!S.getAsInteger(0, Val)) {
+        Cfg.Seed = Val;
+        Cfg.Rot = 7 + ((Val >> 16) % 19); // Rot in [7, 25]
+        static const uint32_t Muls[] = {1, 3, 5, 7, 9, 13, 17, 31, 33, 37, 65, 127};
+        Cfg.Mul = Muls[(Val >> 8) % (sizeof(Muls) / sizeof(Muls[0]))];
+        Cfg.Xor = (Val >> 4) & 0xFF;
+        if (getenv("MEMLLVM_VERBOSE")) {
+          errs() << "[MemLLVM] API Hash config from MEMLLVM_HASH_SEED: Seed=0x"
+                 << Twine::utohexstr(Cfg.Seed) << " Rot=" << Cfg.Rot
+                 << " Mul=" << Cfg.Mul << " Xor=0x" << Twine::utohexstr(Cfg.Xor) << "\n";
+        }
+        return Cfg;
+      }
+    }
+
+    // 2. Check session seed file in %TEMP% based on current directory
+    std::string Cwd;
+    std::error_code EC;
+    auto CurrPath = std::filesystem::current_path(EC);
+    if (!EC) {
+      Cwd = CurrPath.string();
+    } else {
+      Cwd = "memllvm_default_dir";
+    }
+
+    uint32_t CwdHash = 0x811c9dc5;
+    for (char c : Cwd) {
+      char lower_c = (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
+      if (lower_c == '/') lower_c = '\\';
+      CwdHash = (CwdHash ^ (unsigned char)lower_c) * 0x01000193;
+    }
+
+    std::filesystem::path TempDir = std::filesystem::temp_directory_path(EC);
+    if (EC) {
+      TempDir = "C:\\Windows\\Temp";
+    }
+    std::string SeedFileName = "memllvm_session_" + Twine::utohexstr(CwdHash).str() + ".seed";
+    std::filesystem::path SeedPath = TempDir / SeedFileName;
+
+    bool ValidFile = false;
+    if (std::filesystem::exists(SeedPath)) {
+      auto LastWrite = std::filesystem::last_write_time(SeedPath, EC);
+      if (!EC) {
+        auto Now = std::filesystem::file_time_type::clock::now();
+        auto AgeSeconds = std::chrono::duration_cast<std::chrono::seconds>(Now - LastWrite).count();
+        if (AgeSeconds >= 0 && AgeSeconds < 60) {
+          std::ifstream In(SeedPath.string());
+          if (In >> Cfg.Seed >> Cfg.Rot >> Cfg.Mul >> Cfg.Xor) {
+            if (Cfg.Rot >= 1 && Cfg.Rot <= 31 && (Cfg.Mul % 2 == 1)) {
+              ValidFile = true;
+              std::filesystem::last_write_time(SeedPath, Now, EC);
+            }
+          }
+        }
+      }
+    }
+
+    if (!ValidFile) {
+      std::random_device RD;
+      std::mt19937 Gen(RD() ^ (uint32_t)std::chrono::steady_clock::now().time_since_epoch().count());
+      std::uniform_int_distribution<uint32_t> SeedDist(0x10000000, 0xEFFFFFFF);
+      std::uniform_int_distribution<uint32_t> RotDist(7, 25);
+      static const uint32_t Muls[] = {1, 3, 5, 7, 9, 13, 17, 31, 33, 37, 65, 127};
+      std::uniform_int_distribution<size_t> MulDist(0, (sizeof(Muls) / sizeof(Muls[0])) - 1);
+      std::uniform_int_distribution<uint32_t> XorDist(0, 0xFF);
+
+      Cfg.Seed = SeedDist(Gen);
+      Cfg.Rot  = RotDist(Gen);
+      Cfg.Mul  = Muls[MulDist(Gen)];
+      Cfg.Xor  = XorDist(Gen);
+
+      std::ofstream Out(SeedPath.string(), std::ios::trunc);
+      if (Out) {
+        Out << Cfg.Seed << " " << Cfg.Rot << " " << Cfg.Mul << " " << Cfg.Xor << "\n";
+      }
+    }
+
+    if (getenv("MEMLLVM_VERBOSE")) {
+      errs() << "[MemLLVM] API Hash active config: Seed=0x"
+             << Twine::utohexstr(Cfg.Seed) << " Rot=" << Cfg.Rot
+             << " Mul=" << Cfg.Mul << " Xor=0x" << Twine::utohexstr(Cfg.Xor) << "\n";
+    }
+
+    return Cfg;
+  }();
+
+  return Config;
+}
+
+uint32_t calculateDynamicHash(StringRef str) {
+  return getGlobalHashConfig().hash(str);
+}
+
+uint32_t calculateDynamicDllHash(StringRef dllStr) {
+  return getGlobalHashConfig().hashWideLower(dllStr);
+}
 
 uint32_t calculateRor13(StringRef str) {
   uint32_t hash = 0;

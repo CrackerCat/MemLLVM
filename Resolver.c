@@ -8,25 +8,40 @@ typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 typedef unsigned long long uintptr_t;
 
-#define HASH_LOADLIBRARYA 0xEC0E4E8E
 #define MAX_FORWARD_DEPTH 4
 
-static inline uint32_t memllvm_ror13(const char *s) {
-  uint32_t h = 0;
+/*
+ * Dynamic hash configuration parameters injected per-build by ApiResolvePass.
+ * Defaults are classic ROR13 parameters for zero-friction fallback.
+ */
+volatile uint32_t g_memllvm_hash_seed = 0;
+volatile uint32_t g_memllvm_hash_rot  = 13;
+volatile uint32_t g_memllvm_hash_mul  = 1;
+volatile uint32_t g_memllvm_hash_xor  = 0;
+volatile uint32_t g_memllvm_hash_loadlibrarya = 0xEC0E4E8E;
+
+static inline uint32_t memllvm_hash(const char *s) {
+  uint32_t h = g_memllvm_hash_seed;
+  uint32_t rot = g_memllvm_hash_rot;
+  uint32_t mul = g_memllvm_hash_mul;
+  uint32_t xor_val = g_memllvm_hash_xor;
   while (*s) {
-    h = (h >> 13) | (h << 19);
-    h += (uint8_t)*s++;
+    h = (h >> rot) | (h << (32 - rot));
+    h += ((uint8_t)*s++ * mul) ^ xor_val;
   }
   return h;
 }
 
-static inline uint32_t memllvm_ror13_wide_lower(const uint16_t *ws, uint32_t len) {
-  uint32_t h = 0;
+static inline uint32_t memllvm_hash_wide_lower(const uint16_t *ws, uint32_t len) {
+  uint32_t h = g_memllvm_hash_seed;
+  uint32_t rot = g_memllvm_hash_rot;
+  uint32_t mul = g_memllvm_hash_mul;
+  uint32_t xor_val = g_memllvm_hash_xor;
   for (uint32_t i = 0; i < len; ++i) {
     uint32_t c = ws[i];
     if (c >= 'A' && c <= 'Z') c += ('a' - 'A');
-    h = (h >> 13) | (h << 19);
-    h += (uint8_t)c;
+    h = (h >> rot) | (h << (32 - rot));
+    h += ((uint8_t)c * mul) ^ xor_val;
   }
   return h;
 }
@@ -47,7 +62,7 @@ static uint8_t *memllvm_find_module(uint32_t dll_hash) {
     if (dll_hash) {
       uint16_t len = *(uint16_t *)(cur + 0x58);
       uint16_t *buf = *(uint16_t **)(cur + 0x60);
-      if (buf && len && memllvm_ror13_wide_lower(buf, len / 2) == dll_hash) {
+      if (buf && len && memllvm_hash_wide_lower(buf, len / 2) == dll_hash) {
         return b;
       }
     }
@@ -71,7 +86,7 @@ static void *memllvm_resolve_forwarder(uint8_t *base, uint32_t fn_rva, uint32_t 
   buf[n] = '\0';
 
   void *(*load_lib)(const char *) =
-      (void *(*)(const char *))memllvm_find(0, HASH_LOADLIBRARYA, depth + 1);
+      (void *(*)(const char *))memllvm_find(0, g_memllvm_hash_loadlibrarya, depth + 1);
   if (!load_lib) return 0;
 
   uint8_t *target_base = (uint8_t *)load_lib(buf);
@@ -88,7 +103,7 @@ static void *memllvm_resolve_forwarder(uint8_t *base, uint32_t fn_rva, uint32_t 
     return memllvm_find_ordinal(target_base, ord, depth + 1);
   }
 
-  return memllvm_find(target_base, memllvm_ror13(target_func), depth + 1);
+  return memllvm_find(target_base, memllvm_hash(target_func), depth + 1);
 }
 
 static void *memllvm_find_ordinal(uint8_t *base, uint32_t ordinal, int depth) {
@@ -179,7 +194,7 @@ static void *memllvm_find(uint8_t *base, uint32_t hash, int depth) {
   uint16_t *ords = (uint16_t *)(base + *(uint32_t *)(dir + 0x24));
 
   for (uint32_t i = 0; i < num_names; ++i) {
-    if (memllvm_ror13((const char *)(base + names[i])) != hash)
+    if (memllvm_hash((const char *)(base + names[i])) != hash)
       continue;
 
     uint32_t fn_rva = funcs[ords[i]];
@@ -189,8 +204,13 @@ static void *memllvm_find(uint8_t *base, uint32_t hash, int depth) {
   return 0;
 }
 
-void *MemLLVM_GetApiAddress(uint32_t ror13_hash) {
-  return memllvm_find(0, ror13_hash, 0);
+void *MemLLVM_GetApiAddress(uint32_t api_hash) {
+  return memllvm_find(0, api_hash, 0);
+}
+
+void *MemLLVM_GetApiAddressByName(const char *name) {
+  if (!name) return 0;
+  return memllvm_find(0, memllvm_hash(name), 0);
 }
 
 void *MemLLVM_GetApiAddressByOrdinal(uint32_t dll_hash, uint32_t ordinal) {
@@ -206,5 +226,5 @@ void *MemLLVM_GetProcAddress(void *module_base, const char *name_or_ordinal) {
   if ((uintptr_t)name_or_ordinal <= 0xFFFF) {
     return memllvm_find_ordinal((uint8_t *)module_base, (uint32_t)(uintptr_t)name_or_ordinal, 0);
   }
-  return memllvm_find((uint8_t *)module_base, memllvm_ror13(name_or_ordinal), 0);
+  return memllvm_find((uint8_t *)module_base, memllvm_hash(name_or_ordinal), 0);
 }

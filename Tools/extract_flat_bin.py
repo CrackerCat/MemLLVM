@@ -260,6 +260,77 @@ def build_stub(stub_offset, orig_base, entry_offset, num_relocs,
     return bytes(code)
 
 
+def crypt_payload(data, key, rva):
+    size = len(data)
+    state = (key ^ (rva * 0x9E3779B9) ^ (size * 0x85EBCA6B)) & 0xFFFFFFFF
+    for i in range(size):
+        state = (state * 1664525 + 1013904223) & 0xFFFFFFFF
+        data[i] ^= (state >> 24) & 0xFF
+
+
+def encrypt_resource_leaves(flat_buf, rsrc_offset, rsrc_size, base_rva):
+    """
+    Walk the 3-level PE resource directory tree in flat_buf.
+    Encrypt each leaf payload with an independent random key and record the key
+    in IMAGE_RESOURCE_DATA_ENTRY.Reserved.
+    """
+    if rsrc_size < 16:
+        return 0, 0
+
+    import secrets
+    count = 0
+    total_bytes = 0
+
+    def walk_dir(dir_rel_off):
+        nonlocal count, total_bytes
+        if dir_rel_off + 16 > rsrc_size:
+            return
+        abs_dir_off = rsrc_offset + dir_rel_off
+        num_named = _u16(flat_buf, abs_dir_off + 12)
+        num_id = _u16(flat_buf, abs_dir_off + 14)
+        total_entries = num_named + num_id
+        entries_rel_off = dir_rel_off + 16
+
+        for i in range(total_entries):
+            entry_rel_off = entries_rel_off + i * 8
+            if entry_rel_off + 8 > rsrc_size:
+                break
+            abs_entry_off = rsrc_offset + entry_rel_off
+            name_or_id = _u32(flat_buf, abs_entry_off)
+            offset_to_data = _u32(flat_buf, abs_entry_off + 4)
+
+            is_dir = bool(offset_to_data & 0x80000000)
+            target = offset_to_data & 0x7FFFFFFF
+
+            if is_dir:
+                walk_dir(target)
+            else:
+                leaf_abs = rsrc_offset + target
+                if leaf_abs + 16 > len(flat_buf):
+                    continue
+                rva = _u32(flat_buf, leaf_abs)
+                size = _u32(flat_buf, leaf_abs + 4)
+                if size == 0:
+                    continue
+
+                # Generate random 32-bit key with high bit set (ensures non-zero)
+                key = (secrets.randbelow(0x7FFFFFFF) | 0x80000000)
+
+                payload_offset = rva - base_rva
+                if 0 <= payload_offset and payload_offset + size <= len(flat_buf):
+                    chunk = bytearray(flat_buf[payload_offset : payload_offset + size])
+                    crypt_payload(chunk, key, rva)
+                    flat_buf[payload_offset : payload_offset + size] = chunk
+
+                    # Store key into IMAGE_RESOURCE_DATA_ENTRY.Reserved
+                    struct.pack_into('<I', flat_buf, leaf_abs + 12, key)
+                    count += 1
+                    total_bytes += size
+
+    walk_dir(0)
+    return count, total_bytes
+
+
 def make_flat_bin(exe_path, out_bin_path):
     with open(exe_path, 'rb') as f:
         data = f.read()
@@ -337,6 +408,10 @@ def make_flat_bin(exe_path, out_bin_path):
         rsrc_size = rsrc_sec['span']
         print('  [+] Resources: Preserved .rsrc (%d bytes at offset 0x%X)'
               % (rsrc_size, rsrc_offset))
+        enc_count, enc_bytes = encrypt_resource_leaves(flat_buf, rsrc_offset, rsrc_size, base_rva)
+        if enc_count > 0:
+            print('  [+] Resources: Encrypted %d leaf payloads (%d bytes) with independent random keys'
+                  % (enc_count, enc_bytes))
 
     rsrc_info_offset = None
     rsrc_magic_bytes = struct.pack('<Q', 0x4D454D4C4C564D52) # 'MEMLLVMR'

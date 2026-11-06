@@ -54,8 +54,8 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 |                     |  4. GlobalSectionPass  - 强制合并不连续节区为平坦段     |                 |
 |                     |  5. GlobalPointerPass  - 动态虚表(vtable)基址差值重定位 |                 |
 |                     |  6. AutoLoadLibraryPass- 自动检测并动态注入子系统 DLL   |                 |
-|                     |  7. StackStringPass    - 栈上寄存器展开消除只读字符串   |                 |
-|                     |  8. ApiResolvePass     - 抹除 IAT，内联 ROR13 PEB 寻址  |                 |
+|                     |  7. StackStringPass    - 【即用即解，用完即删】字符串/常量调用点 JIT 局部栈解密与瞬态抹零 |
+|                     |  8. ApiResolvePass     - 抹除 IAT，会话多态参数化 API 动态哈希 PEB 运行时解析             |
 |                     +---------------------------------------------------------+                 |
 |                                                  |                                              |
 |                                                  v                                              |
@@ -63,7 +63,7 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 |                                                  |                                              |
 |                                                  v                                              |
 |                           [扁平二进制提取器 (extract_flat_bin.py)]                               |
-|                                 + [ABI 严格合规的自重定位引导桩]                                |
+|                     + [视窗静态资源 .rsrc 叶子独立随机 Key 加密] + [自重定位引导桩]              |
 |                                                  |                                              |
 |                                                  v                                              |
 |                ===================================================================              |
@@ -83,6 +83,9 @@ entry(); // 瞬间自举完成 C++20 运行时、静态对象初始化并进入 
 | 开发维度 | 全面支持的技术能力与实现原理 |
 | :--- | :--- |
 | **现代 C++20/C++23 语言核心** | 模板元编程、概念（Concepts）、Lambda 闭包、`constexpr`、多层多重虚拟继承与多态虚表（`vtable`）。**Meyers 线程安全单例全面支持**：`StlStubPass` 将隐式 TLS 检查与 `_Init_thread_epoch` 改写为常规内存原子 CAS 指令，彻底斩断对 OS TLS 的依赖。**C++20 协程系统**（`co_await`、`co_return`、`std::coroutine_handle`）实测编译为扁平二进制仅 222 字节。 |
+| **会话多态 API 动态哈希随机化** | **彻底终结固定 ROR13 签名特征**！每个编译会话自动派生或通过 `MEMLLVM_HASH_SEED` 指定独立多态哈希四参数（`Seed`、`ROT`、`MUL`、`XOR`）；`Resolver.c` 与 `ApiResolvePass` 参数化动态注入，消除了包括 `LoadLibraryA` 在内的全部硬编码哈希；`ltl.lib` 静态库通过 `MemLLVM_GetApiAddressByName` 与用户工程会话种子解耦，实现了一次编译、任意工程随用。 |
+| **字符串与常量【即用即解，用完即删】** | **函数级 Scoped JIT 即时解密与物理粉碎**！`StackStringPass` 扫描只读字符串与常量查找表，编译期就地替换为加盐异或密文并剥离常量标记；在函数调用点（`CallBase`/`Invoke`）私有栈帧动态开辟对齐缓冲区，插入内联展开的纳秒级 JIT 快速解密指令流；调用返回后（包括正常流与异常展开分支）立即插入 volatile 强制物理抹零指令（`llvm.memset` 零填充），实现内存即用即解、用完即删，磁盘二进制与函数执行结束后内存中 0 明文残留。 |
+| **视窗静态资源（`.rsrc`）细粒度加密** | **叶子节点独立随机 Key 加密与瞬态抹除**！提取器（`extract_flat_bin.py`）保留 PE 3 级资源目录树骨架以维持 $O(\log N)$ 零开销目录遍历，对全部叶子物理数据块（位图 DIB、图标字节流、对话框模板、菜单结构、Pascal 变长字串表）按叶子独立分配随机 Key 加密；LTL 运行时（`crt_resources.cpp`）在 `LoadBitmap`、`LoadIcon`、`DialogBoxParam`、`LoadMenu` 等创建系统内核/GDI 句柄后立即调用 `SecureZeroMemory` 物理粉碎临时明文，并配合轻量级句柄缓存，平坦二进制静态数据中杜绝任何明文位图与对话框数据。 |
 | **原生 PE 资源系统（`.rsrc`）** | **无 PE 头部直接原生支持 Win32 资源树**！提取器完整保留 `.rsrc` 物理段，引导桩动态绑定基址，LTL 运行时内置纯内存三级目录树解析引擎，透明接管 `FindResource(Ex)A/W`、`LoadResource`、`LockResource`、`SizeofResource`、`LoadStringA/W`（Pascal 变长字串表）、`DialogBoxParamA/W`、`CreateDialogParamA/W`、`LoadMenuA/W`、`LoadAcceleratorsA/W`、`LoadIconA/W`、`LoadCursorA/W`、`LoadBitmapA/W` 及资源枚举，外部系统模块透明回退。 |
 | **序数导出（`[NONAME]`）寻址** | **全量攻克 Windows 无名序数接口**！内置 Windows 10/11 SDK 全部 80 个核心系统 DLL 的 2,729 个无名序数导出二分检索索引；`ApiResolvePass` 自动改写为 `MemLLVM_GetApiAddressByOrdinal`；自举解析器原生支持递归多级转导链（`DLL.#ordinal` 与 `DLL.func`）及 `<dll>_Ordinal_<ord>` 自定义调用。 |
 | **C++ 异常与栈回溯** | **完整支持 `try` / `catch` / `throw` 与重新抛出（`throw;`）**！自包含表驱动 SEH 机制，引导桩根据动态 `MEMLLVME` 描述符自动向内核注册 `.pdata` 展开表（`RtlAddFunctionTable`），保证栈回溯（Stack Unwinding）过程中局部变量 RAII 析构函数 100% 可靠逆序执行，进程/载荷退出自动注销。 |

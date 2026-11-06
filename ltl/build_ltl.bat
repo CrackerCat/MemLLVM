@@ -51,6 +51,7 @@ if "%PLUGIN_DLL%"=="" (
 )
 
 echo [*] Compiling MemLLVM-LTL components...
+set MEMLLVM_BUILDING_LTL=1
 
 set COMP_FLAGS=/c /O1 /clang:-Oz /Gy /clang:-ffunction-sections /clang:-fdata-sections /GS- /GR- /clang:-fno-jump-tables /clang:-fno-unwind-tables /clang:-fno-asynchronous-unwind-tables /clang:-fno-exceptions /D_HAS_EXCEPTIONS=0 -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%"
 set EH_COMP_FLAGS=/c /O1 /clang:-Oz /Gy /clang:-ffunction-sections /clang:-fdata-sections /GS- /GR- /clang:-fno-jump-tables /EHsc -I"%LTL_ROOT%\include" "/clang:-fpass-plugin=%PLUGIN_DLL%"
