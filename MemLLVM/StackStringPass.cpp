@@ -1,5 +1,6 @@
 #include "MemLLVM.h"
 #include "MemLLVMUtils.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
@@ -17,6 +18,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstring>
+#include <map>
 #include <random>
 #include <set>
 #include <string>
@@ -35,74 +37,25 @@ static uint8_t getXorByte(uint32_t Key, size_t i) {
 
 static bool isTrivialString(ArrayRef<uint8_t> Bytes, bool isWide, int EncryptLevel) {
   if (EncryptLevel >= 2)
-    return false; // Aggressive mode: encrypt everything
+    return false; // Aggressive: encrypt everything
 
   size_t N = Bytes.size();
   if (isWide) {
-    // Wide string (UTF-16LE)
     while (N >= 2 && Bytes[N - 1] == 0 && Bytes[N - 2] == 0) {
       N -= 2;
     }
-    // <= 3 characters (<= 6 bytes), skip
-    if (N <= 6)
+    // <= 2 wide characters, skip
+    if (N <= 4)
       return true;
-
-    // Check ASCII-compatible wide characters
-    std::string NarrowStr;
-    bool allAscii = true;
-    for (size_t i = 0; i < N; i += 2) {
-      if (Bytes[i + 1] != 0) {
-        allAscii = false;
-        break;
-      }
-      NarrowStr.push_back(static_cast<char>(Bytes[i]));
-    }
-    if (allAscii && !NarrowStr.empty()) {
-      if (NarrowStr.front() == '%' && NarrowStr.size() <= 8) {
-        bool isFmt = true;
-        for (char c : NarrowStr) {
-          if (!isalnum(static_cast<unsigned char>(c)) && c != '%' && c != '.' &&
-              c != '-' && c != '+' && c != ' ') {
-            isFmt = false;
-            break;
-          }
-        }
-        if (isFmt)
-          return true;
-      }
-    }
     return false;
   }
 
-  // Narrow string
   while (N > 0 && Bytes[N - 1] == 0) {
     --N;
   }
-  // <= 3 characters, skip
-  if (N <= 3)
+  // <= 2 characters (e.g. "", "\n", " "), skip
+  if (N <= 2)
     return true;
-
-  StringRef S(reinterpret_cast<const char *>(Bytes.data()), N);
-
-  // Common format masks like "%02x", "%lld", "%s", "%d", etc.
-  if (S.front() == '%' && S.size() <= 8) {
-    bool isFmt = true;
-    for (char c : S) {
-      if (!isalnum(static_cast<unsigned char>(c)) && c != '%' && c != '.' &&
-          c != '-' && c != '+' && c != ' ') {
-        isFmt = false;
-        break;
-      }
-    }
-    if (isFmt)
-      return true;
-  }
-
-  // Common non-sensitive syntax tokens / delimiters
-  if (S == "\r\n" || S == ", " || S == ": " || S == " = " || S == "..." ||
-      S == "true" || S == "false" || S == "null" || S == "none" || S == "error") {
-    return true;
-  }
 
   return false;
 }
@@ -147,11 +100,10 @@ static bool canTransformGlobalString(GlobalVariable *GV,
     return false;
   }
 
-  // Size limit: between 1 and 512 bytes (protects stack frames from overflow)
-  if (Bytes.empty() || Bytes.size() > 512)
+  // Size limit: between 1 and 2048 bytes
+  if (Bytes.empty() || Bytes.size() > 2048)
     return false;
 
-  // Filter out trivial non-sensitive strings in Level 1
   if (isTrivialString(Bytes, isWide, EncryptLevel))
     return false;
 
@@ -324,128 +276,6 @@ static Function *getOrCreateWipeHelper(Module &M) {
   return F;
 }
 
-static bool transformGlobalString(GlobalVariable *GV,
-                                 ArrayRef<uint8_t> PlainBytes,
-                                 bool isWide,
-                                 Module &M) {
-  size_t N = PlainBytes.size();
-  if (N == 0)
-    return false;
-
-  LLVMContext &Ctx = M.getContext();
-
-  // 1. Unpack all ConstantExpr users into normal instructions inside functions
-  SmallVector<ConstantExpr *, 8> CEUsers;
-  for (User *U : GV->users()) {
-    if (auto *CE = dyn_cast<ConstantExpr>(U)) {
-      CEUsers.push_back(CE);
-    }
-  }
-
-  while (!CEUsers.empty()) {
-    ConstantExpr *CE = CEUsers.pop_back_val();
-    SmallVector<User *, 8> SubUsers(CE->user_begin(), CE->user_end());
-    for (User *SubU : SubUsers) {
-      if (auto *SubCE = dyn_cast<ConstantExpr>(SubU)) {
-        CEUsers.push_back(SubCE);
-      } else if (auto *I = dyn_cast<Instruction>(SubU)) {
-        Instruction *NewInst = CE->getAsInstruction();
-        NewInst->insertBefore(I->getIterator());
-        I->replaceUsesOfWith(CE, NewInst);
-      }
-    }
-  }
-
-  // 2. Identify all target functions referencing GV
-  std::set<Function *> TargetFunctions;
-  for (User *U : GV->users()) {
-    if (auto *I = dyn_cast<Instruction>(U)) {
-      if (Function *F = I->getFunction()) {
-        if (!F->isDeclaration())
-          TargetFunctions.insert(F);
-      }
-    }
-  }
-
-  if (TargetFunctions.empty())
-    return false;
-
-  // 3. Generate random 32-bit key and encrypt the global string initializer
-  std::random_device RD;
-  uint32_t Key = RD() ^ static_cast<uint32_t>(N * 31337);
-  SmallVector<uint8_t, 64> CipherBytes(N);
-  for (size_t i = 0; i < N; ++i) {
-    CipherBytes[i] = PlainBytes[i] ^ getXorByte(Key, i);
-  }
-
-  // Set encrypted initializer matching the global variable type
-  if (isWide && (N % 2 == 0)) {
-    SmallVector<uint16_t, 32> CipherWords(N / 2);
-    for (size_t i = 0; i < N / 2; ++i) {
-      CipherWords[i] = static_cast<uint16_t>(CipherBytes[2 * i]) |
-                       (static_cast<uint16_t>(CipherBytes[2 * i + 1]) << 8);
-    }
-    GV->setInitializer(ConstantDataArray::get(Ctx, CipherWords));
-  } else {
-    GV->setInitializer(ConstantDataArray::get(Ctx, CipherBytes));
-  }
-  GV->setConstant(false); // Mark as non-constant so optimizer doesn't fold reads
-  GV->setLinkage(GlobalValue::InternalLinkage);
-  GV->setComdat(nullptr);
-
-  Function *DecryptHelper = getOrCreateDecryptHelper(M);
-  Function *WipeHelper    = getOrCreateWipeHelper(M);
-
-  // 4. Transform each function: Function-Scope RAII
-  for (Function *F : TargetFunctions) {
-    // 4a. Find insertion point for alloca in entry block (before first non-alloca)
-    Instruction *FirstNonAlloca = nullptr;
-    for (Instruction &I : F->getEntryBlock()) {
-      if (!isa<AllocaInst>(&I)) {
-        FirstNonAlloca = &I;
-        break;
-      }
-    }
-    IRBuilder<> AllocaBuilder(FirstNonAlloca ? FirstNonAlloca : &*F->getEntryBlock().getFirstInsertionPt());
-    AllocaInst *LocalBuf = AllocaBuilder.CreateAlloca(GV->getValueType(), nullptr, "jit_str");
-    LocalBuf->setAlignment(Align(16));
-
-    // 4b. Decrypt once at function entry (immediately before FirstNonAlloca)
-    IRBuilder<> DecryptBuilder(FirstNonAlloca ? FirstNonAlloca : &*F->getEntryBlock().getFirstInsertionPt());
-    CallInst *DecryptCall = DecryptBuilder.CreateCall(
-        DecryptHelper,
-        {LocalBuf, GV, DecryptBuilder.getInt64(N), DecryptBuilder.getInt32(Key)});
-
-    // 4c. Replace all other uses of GV in function F with LocalBuf
-    SmallVector<Instruction *, 16> InstUsers;
-    for (User *U : GV->users()) {
-      if (auto *I = dyn_cast<Instruction>(U)) {
-        if (I->getFunction() == F && I != DecryptCall) {
-          InstUsers.push_back(I);
-        }
-      }
-    }
-    for (Instruction *I : InstUsers) {
-      I->replaceUsesOfWith(GV, LocalBuf);
-    }
-
-    // 4d. Ephemeral Wipe: securely wipe LocalBuf before each return / resume in F
-    SmallVector<Instruction *, 4> ExitInsts;
-    for (BasicBlock &BB : *F) {
-      Instruction *Term = BB.getTerminator();
-      if (isa<ReturnInst>(Term) || isa<ResumeInst>(Term)) {
-        ExitInsts.push_back(Term);
-      }
-    }
-    for (Instruction *ExitI : ExitInsts) {
-      IRBuilder<> WipeBuilder(ExitI);
-      WipeBuilder.CreateCall(WipeHelper, {LocalBuf, WipeBuilder.getInt64(N)});
-    }
-  }
-
-  return true;
-}
-
 } // namespace
 
 PreservedAnalyses StackStringPass::run(Module &M, ModuleAnalysisManager &MAM) {
@@ -458,37 +288,196 @@ PreservedAnalyses StackStringPass::run(Module &M, ModuleAnalysisManager &MAM) {
     EncryptLevel = std::atoi(EnvVal);
   }
 
-  SmallVector<GlobalVariable *, 32> StringGlobals;
-  std::vector<SmallVector<uint8_t, 64>> PlainByteVectors;
-  SmallVector<bool, 32> IsWideFlags;
+  // 1. Identify all eligible string globals
+  struct StringInfo {
+    SmallVector<uint8_t, 64> Bytes;
+    bool isWide;
+  };
+  DenseMap<GlobalVariable *, StringInfo> EligibleStrings;
 
   for (GlobalVariable &GV : M.globals()) {
     SmallVector<uint8_t, 64> Bytes;
     bool isWide = false;
     if (canTransformGlobalString(&GV, Bytes, isWide, EncryptLevel)) {
-      StringGlobals.push_back(&GV);
-      PlainByteVectors.push_back(std::move(Bytes));
-      IsWideFlags.push_back(isWide);
+      EligibleStrings[&GV] = {std::move(Bytes), isWide};
     }
   }
 
-  if (StringGlobals.empty())
+  if (EligibleStrings.empty())
     return PreservedAnalyses::all();
 
-  unsigned TransformedCount = 0;
-  for (size_t i = 0; i < StringGlobals.size(); ++i) {
-    if (transformGlobalString(StringGlobals[i], PlainByteVectors[i], IsWideFlags[i], M)) {
-      ++TransformedCount;
+  // 2. Unpack ConstantExpr users into normal instructions inside functions
+  for (auto &Pair : EligibleStrings) {
+    GlobalVariable *GV = Pair.first;
+    SmallVector<ConstantExpr *, 8> CEUsers;
+    for (User *U : GV->users()) {
+      if (auto *CE = dyn_cast<ConstantExpr>(U)) {
+        CEUsers.push_back(CE);
+      }
+    }
+    while (!CEUsers.empty()) {
+      ConstantExpr *CE = CEUsers.pop_back_val();
+      SmallVector<User *, 8> SubUsers(CE->user_begin(), CE->user_end());
+      for (User *SubU : SubUsers) {
+        if (auto *SubCE = dyn_cast<ConstantExpr>(SubU)) {
+          CEUsers.push_back(SubCE);
+        } else if (auto *I = dyn_cast<Instruction>(SubU)) {
+          Instruction *NewInst = CE->getAsInstruction();
+          NewInst->insertBefore(I->getIterator());
+          I->replaceUsesOfWith(CE, NewInst);
+        }
+      }
     }
   }
 
-  if (TransformedCount > 0 && getenv("MEMLLVM_VERBOSE")) {
-    errs() << "[MemLLVM] StackStringPass: Protected " << TransformedCount
-           << " string constant(s) with function-scope JIT decryption & ephemeral wipe (level="
-           << EncryptLevel << ")\n";
+  // 3. Map each function to the set of string globals it uses
+  std::map<Function *, std::vector<GlobalVariable *>> FuncToStrings;
+  for (auto &Pair : EligibleStrings) {
+    GlobalVariable *GV = Pair.first;
+    std::set<Function *> TargetFunctions;
+    for (User *U : GV->users()) {
+      if (auto *I = dyn_cast<Instruction>(U)) {
+        if (Function *F = I->getFunction()) {
+          if (!F->isDeclaration())
+            TargetFunctions.insert(F);
+        }
+      }
+    }
+    for (Function *F : TargetFunctions) {
+      FuncToStrings[F].push_back(GV);
+    }
   }
 
-  return TransformedCount > 0 ? PreservedAnalyses::none() : PreservedAnalyses::all();
+  if (FuncToStrings.empty())
+    return PreservedAnalyses::all();
+
+  LLVMContext &Ctx = M.getContext();
+  Function *DecryptHelper = getOrCreateDecryptHelper(M);
+  Function *WipeHelper    = getOrCreateWipeHelper(M);
+
+  unsigned TransformedStrings = 0;
+  unsigned TransformedFuncs   = 0;
+  std::random_device RD;
+
+  // 4. Transform each function using Compound Stack String Pool
+  for (auto &Entry : FuncToStrings) {
+    Function *F = Entry.first;
+    const std::vector<GlobalVariable *> &GVList = Entry.second;
+    if (GVList.empty())
+      continue;
+
+    // 4a. Pack strings into CompoundBytes and record offsets
+    SmallVector<uint8_t, 512> CompoundBytes;
+    DenseMap<GlobalVariable *, uint64_t> OffsetMap;
+
+    for (GlobalVariable *GV : GVList) {
+      const auto &Info = EligibleStrings[GV];
+      // If wide string, align to 2 bytes
+      if (Info.isWide && (CompoundBytes.size() % 2 != 0)) {
+        CompoundBytes.push_back(0);
+      }
+      OffsetMap[GV] = CompoundBytes.size();
+      CompoundBytes.append(Info.Bytes.begin(), Info.Bytes.end());
+    }
+
+    size_t TotalLen = CompoundBytes.size();
+    if (TotalLen == 0)
+      continue;
+
+    // Protect stack frames: cap single-function compound pool to 32 KB
+    if (TotalLen > 32768)
+      continue;
+
+    // 4b. Encrypt CompoundBytes with a unique 32-bit random key
+    uint32_t Key = RD() ^ static_cast<uint32_t>(TotalLen * 31337 + TransformedFuncs);
+    SmallVector<uint8_t, 512> CipherBytes(TotalLen);
+    for (size_t i = 0; i < TotalLen; ++i) {
+      CipherBytes[i] = CompoundBytes[i] ^ getXorByte(Key, i);
+    }
+
+    // 4c. Create the read-only compound pool global in module
+    Constant *PoolInit = ConstantDataArray::get(Ctx, CipherBytes);
+    GlobalVariable *PoolGV = new GlobalVariable(
+        M,
+        ArrayType::get(Type::getInt8Ty(Ctx), TotalLen),
+        /*isConstant=*/true,
+        GlobalValue::InternalLinkage,
+        PoolInit,
+        "__memllvm_pool_" + Twine(TransformedFuncs));
+    PoolGV->setAlignment(Align(16));
+
+    // 4d. In function F's entry block: find FirstNonAlloca
+    Instruction *FirstNonAlloca = nullptr;
+    for (Instruction &I : F->getEntryBlock()) {
+      if (!isa<AllocaInst>(&I)) {
+        FirstNonAlloca = &I;
+        break;
+      }
+    }
+
+    // Allocate single compound buffer on stack
+    IRBuilder<> AllocaBuilder(FirstNonAlloca ? FirstNonAlloca : &*F->getEntryBlock().getFirstInsertionPt());
+    AllocaInst *PoolBuf = AllocaBuilder.CreateAlloca(
+        ArrayType::get(Type::getInt8Ty(Ctx), TotalLen), nullptr, "jit_pool");
+    PoolBuf->setAlignment(Align(16));
+
+    // Decrypt once at function entry
+    IRBuilder<> DecryptBuilder(FirstNonAlloca ? FirstNonAlloca : &*F->getEntryBlock().getFirstInsertionPt());
+    DecryptBuilder.CreateCall(
+        DecryptHelper,
+        {PoolBuf, PoolGV, DecryptBuilder.getInt64(TotalLen), DecryptBuilder.getInt32(Key)});
+
+    // 4e. Replace uses of each GV inside function F with GEP(PoolBuf, Offset)
+    IRBuilder<> GEPBuilder(FirstNonAlloca ? FirstNonAlloca : &*F->getEntryBlock().getFirstInsertionPt());
+    for (GlobalVariable *GV : GVList) {
+      uint64_t Off = OffsetMap[GV];
+      Value *StrPtr = GEPBuilder.CreateConstInBoundsGEP1_64(Type::getInt8Ty(Ctx), PoolBuf, Off, "str_ptr");
+
+      SmallVector<Instruction *, 16> InstUsers;
+      for (User *U : GV->users()) {
+        if (auto *I = dyn_cast<Instruction>(U)) {
+          if (I->getFunction() == F) {
+            InstUsers.push_back(I);
+          }
+        }
+      }
+      for (Instruction *I : InstUsers) {
+        I->replaceUsesOfWith(GV, StrPtr);
+      }
+      ++TransformedStrings;
+    }
+
+    // 4f. Ephemeral Wipe: securely wipe PoolBuf before each return / resume in F
+    SmallVector<Instruction *, 4> ExitInsts;
+    for (BasicBlock &BB : *F) {
+      Instruction *Term = BB.getTerminator();
+      if (isa<ReturnInst>(Term) || isa<ResumeInst>(Term)) {
+        ExitInsts.push_back(Term);
+      }
+    }
+    for (Instruction *ExitI : ExitInsts) {
+      IRBuilder<> WipeBuilder(ExitI);
+      WipeBuilder.CreateCall(WipeHelper, {PoolBuf, WipeBuilder.getInt64(TotalLen)});
+    }
+
+    ++TransformedFuncs;
+  }
+
+  // 5. Clean up dead original global variables
+  for (auto &Pair : EligibleStrings) {
+    GlobalVariable *GV = Pair.first;
+    if (GV->user_empty()) {
+      GV->eraseFromParent();
+    }
+  }
+
+  if (TransformedStrings > 0 && getenv("MEMLLVM_VERBOSE")) {
+    errs() << "[MemLLVM] StackStringPass: Protected " << TransformedStrings
+           << " string constant(s) in " << TransformedFuncs
+           << " function compound pool(s) with JIT decryption & ephemeral wipe\n";
+  }
+
+  return TransformedStrings > 0 ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 } // namespace memllvm
