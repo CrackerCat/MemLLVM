@@ -10,8 +10,8 @@
 
 extern "C" {
 
-// Magic signature for extract_flat_bin.py to locate this structure: "MEMLLVME"
-#define MEMLLVM_PDATA_MAGIC 0x4D454D4C4C564D45ULL
+// Magic signature for extract_flat_bin.py to locate this structure (non-ASCII pseudo-random token)
+#define MEMLLVM_PDATA_MAGIC 0x7A2F9B8C5E1D4A30ULL
 
 struct MemLLVM_PDataInfo {
     uint64_t magic;
@@ -21,8 +21,10 @@ struct MemLLVM_PDataInfo {
     uint32_t flags;
 };
 
-// Global metadata descriptor populated by the bootstrap stub or fallback
-__declspec(dllexport) volatile MemLLVM_PDataInfo g_memllvm_pdata_info = {
+// Global metadata descriptor populated by the bootstrap stub or fallback.
+// Retained via /include directive; NOT exported via dllexport to prevent leaking
+// the binary filename and descriptor symbol in PE IMAGE_EXPORT_DIRECTORY.
+volatile MemLLVM_PDataInfo g_memllvm_pdata_info = {
     MEMLLVM_PDATA_MAGIC,
     nullptr,
     nullptr,

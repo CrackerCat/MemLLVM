@@ -1287,6 +1287,7 @@ void SCLoaderApp::CleanupPayloadWindowsAndClasses() {
     HINSTANCE hInst = GetModuleHandleA(nullptr);
     UnregisterClassA("Box2D_Sandbox_Class", hInst);
     UnregisterClassA("MemLLVM_CHIP8_Class", hInst);
+    UnregisterClassA("C8_WndClass", hInst);
     UnregisterClassA("ImGui Example", hInst);
     UnregisterClassW(L"ImGui Example", hInst);
     UnregisterClassA("Scintilla", hInst);

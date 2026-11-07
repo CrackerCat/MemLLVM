@@ -614,8 +614,8 @@ static void BuildIWADDirList(void)
 #endif
 #else
     AddIWADDir (FILES_DIR);
-    AddIWADDir ("D:\\MemLLVM\\examples\\doom");
-    AddIWADDir ("D:/MemLLVM/examples/doom");
+    AddIWADDir (".");
+
 
     // Don't run this function again.
 

@@ -219,7 +219,7 @@ int main(int argc, char **argv)
 {
     static char arg0[] = "doom.bin";
     static char arg1[] = "-iwad";
-    static char arg2[] = "D:\\MemLLVM\\examples\\doom\\doom1.wad";
+    static char arg2[] = "doom1.wad";
     static char *default_argv[] = { arg0, arg1, arg2, NULL };
 
     if (argc <= 1 || argv == NULL)

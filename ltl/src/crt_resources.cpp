@@ -15,7 +15,7 @@
 
 extern "C" {
 
-#define MEMLLVM_RSRC_MAGIC 0x4D454D4C4C564D52ULL // "MEMLLVMR"
+#define MEMLLVM_RSRC_MAGIC 0x5D7B2E94A1C8F036ULL // Non-ASCII pseudo-random token
 
 struct MemLLVM_ResourceInfo {
     uint64_t magic;          // 'MEMLLVMR'
@@ -26,7 +26,7 @@ struct MemLLVM_ResourceInfo {
 };
 
 // Global metadata descriptor populated by extract_flat_bin.py's bootstrap stub
-__declspec(dllexport) volatile MemLLVM_ResourceInfo g_memllvm_resource_info = {
+volatile MemLLVM_ResourceInfo g_memllvm_resource_info = {
     MEMLLVM_RSRC_MAGIC,
     nullptr,
     nullptr,

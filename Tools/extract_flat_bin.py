@@ -104,6 +104,12 @@ def parse_pe(data):
             'span': actual_span,
         })
 
+    # DataDirectory[0] == IMAGE_DIRECTORY_ENTRY_EXPORT
+    export_rva = export_size = 0
+    if num_dirs > 0:
+        export_rva = _u32(data, dir_off)
+        export_size = _u32(data, dir_off + 4)
+
     # DataDirectory[5] == IMAGE_DIRECTORY_ENTRY_BASERELOC
     reloc_rva = reloc_size = 0
     if num_dirs > 5:
@@ -114,6 +120,8 @@ def parse_pe(data):
         'entry_rva': entry_rva,
         'image_base': image_base,
         'sections': sections,
+        'export_rva': export_rva,
+        'export_size': export_size,
         'reloc_rva': reloc_rva,
         'reloc_size': reloc_size,
     }
@@ -391,8 +399,18 @@ def make_flat_bin(exe_path, out_bin_path):
         print('  [+] Exception Handling: Preserved .pdata (%d entries at offset 0x%X)'
               % (pdata_count, pdata_offset))
 
+    # Wipe any leftover PE export directory table (which leaks .exe names and symbol names)
+    if pe.get('export_size', 0) > 0:
+        exp_rva = pe['export_rva']
+        exp_sz = pe['export_size']
+        exp_off = exp_rva - base_rva
+        if 0 <= exp_off and exp_off + exp_sz <= len(flat_buf):
+            print('  [+] Sanitization: Wiped PE export directory (%d bytes at offset 0x%X)'
+                  % (exp_sz, exp_off))
+            flat_buf[exp_off:exp_off + exp_sz] = b'\0' * exp_sz
+
     pdata_info_offset = None
-    magic_bytes = struct.pack('<Q', 0x4D454D4C4C564D45)
+    magic_bytes = struct.pack('<Q', 0x7A2F9B8C5E1D4A30)
     magic_idx = flat_buf.find(magic_bytes)
     if magic_idx != -1:
         pdata_info_offset = magic_idx
@@ -414,7 +432,7 @@ def make_flat_bin(exe_path, out_bin_path):
                   % (enc_count, enc_bytes))
 
     rsrc_info_offset = None
-    rsrc_magic_bytes = struct.pack('<Q', 0x4D454D4C4C564D52) # 'MEMLLVMR'
+    rsrc_magic_bytes = struct.pack('<Q', 0x5D7B2E94A1C8F036)
     rsrc_magic_idx = flat_buf.find(rsrc_magic_bytes)
     if rsrc_magic_idx != -1:
         rsrc_info_offset = rsrc_magic_idx

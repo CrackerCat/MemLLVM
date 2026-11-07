@@ -368,7 +368,7 @@ int main() {
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
-    wc.lpszClassName = "MemLLVM_CHIP8_Class";
+    wc.lpszClassName = "C8_WndClass";
 
     if (!RegisterClassExA(&wc)) {
         return 1;
